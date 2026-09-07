@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd *)",
+      "Bash(cd)",
+      "Bash(sleep 2 *)",
+      "Bash(cat *)",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=24488' | Select-Object ProcessId,Name,CommandLine | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 24488 -Force; Stop-Process -Id 19732 -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; \\(netstat -ano | Select-String ':8000\\\\s' | Select-String 'LISTENING'\\)\" ; echo \"port cleared\")",
+      "Read(//c/Users/Administrator/Desktop/gaze/隔空御剑/web/**)",
+      "Bash(python -m http.server 8000 --bind 127.0.0.1)",
+      "Bash(sleep *)",
+      "Bash(powershell.exe *)"
+    ]
+  }
+}
