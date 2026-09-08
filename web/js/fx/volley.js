@@ -98,6 +98,8 @@ export class Volley {
     this.sws = new Float32Array(N);
     this.stx = new Float32Array(N);
     this.stz = new Float32Array(N);
+    this.fscale = new Float32Array(N).fill(0.85);   // FIRE 中的实例尺度（剑云发射时保持剑形小尺度）
+    this.cloudN = this.swordTotal - 96;             // 剑指：204 把拼剑形，96 把留作背景万剑
     this._packSwordCloud();
 
     for (let i = this.swordTotal; i < N; i++) this.scale[i] = 0;
@@ -196,9 +198,10 @@ export class Volley {
     return this._layTmp;
   }
 
-  // 剑指：把 300 把小剑装进剑形体积（柄/护手/刃），斐波那契圆盘保证互不共点。
+  // 剑指：把前 cloudN 把小剑装进剑形体积（柄/护手/刃），斐波那契圆盘保证互不共点；
+  // 其余 96 把是背景万剑（IDLE 跟手云团，发射时同向跟随）。
   _packSwordCloud() {
-    const N = this.swordTotal;
+    const N = this.cloudN;
     const nHandle = Math.floor(N * 0.10);
     const nGuard = Math.floor(N * 0.14);
     const nBlade = N - nHandle - nGuard;
@@ -313,6 +316,33 @@ export class Volley {
     return -1;
   }
 
+  // 剑指发射（指哪飞哪）：拼成剑形的剑云保持队形整体射出，背景万剑同向跟随；
+  // 飞出屏幕后走 RETURN 自动回到手上重新聚成剑形。
+  launchCloud(dx, dy) {
+    const sp = 30 + Math.random() * 6;
+    let trails = 0;
+    for (let i = 0; i < this.swordTotal; i++) {
+      if (this.mode[i] !== SPHERE) continue;
+      this.mode[i] = FIRE;
+      this.age[i] = 0;
+      this.life[i] = 1.3 + Math.random() * 0.7;
+      const w = (Math.random() - 0.5) * 0.1;   // 轻微散开角，避免一根直线
+      this.vx[i] = (dx - dy * w) * sp;
+      this.vy[i] = (dy + dx * w) * sp;
+      this.vz[i] = 0;
+      if (i < this.cloudN) this.fscale[i] = this.sws[i];   // 剑云保持剑形小尺度
+      else this.fscale[i] = this.scale[i];
+      // 剑云前几把 + 背景零星挂剑气拖尾
+      const wantTrail = i < 4 || (i >= this.cloudN && (i - this.cloudN) % 24 === 0);
+      if (wantTrail && this.trailFree.length) {
+        const tr = this.trailFree.pop();
+        tr.user.idx = i; tr.age = 0; tr.reset(); tr.activate();
+      }
+      trails++;
+    }
+    return trails;
+  }
+
   _seek(i, tx, ty, tz, speed, dt) {
     const dxx = tx - this.px[i], dyy = ty - this.py[i], dzz = tz - this.pz[i];
     const d = Math.hypot(dxx, dyy, dzz) + 1e-6;
@@ -377,6 +407,7 @@ export class Volley {
             this.vy[i] = (this.diry[i] + this.dirx[i] * u * 0.22) * sp;
             this.vz[i] = (Math.random() - 0.5) * 2.2;
             this.scale[i] = 0.85;
+            this.fscale[i] = 0.85;
             if (this.trailFree.length) {
               const tr = this.trailFree.pop();
               tr.user.idx = i; tr.age = 0; tr.reset(); tr.activate();
@@ -491,7 +522,7 @@ export class Volley {
         _q.setFromUnitVectors(Y, _v2);
       }
       let s = this.scale[i];
-      if (m === GATHER || m === FIRE) s = 0.85;
+      if (m === GATHER || m === FIRE) s = this.fscale[i];
       if (m === RETURN) s = this.scale[i] * (1 - Math.min(0.4, this.age[i] * 0.3));
       // scale 不能与 position 共用临时向量：compose 最后才读 position（te[12..14]），
       // 共用会把位置覆盖成 scale 值，全部实例塌缩（v4 坑，见 HANDOFF 8.6 修复 2）
@@ -670,30 +701,70 @@ export class Volley {
         return;
       }
       case 'TAICHI': {
-        // 八卦阵：八门径向剑臂绕手位缓转（面向观众）
-        const gates = 8;
-        const n = Math.ceil(this.swordTotal / gates);
-        const gi = Math.floor(i / n) % gates;
-        const k = i % n;
-        const u = n > 1 ? k / (n - 1) : 0.5;
-        const ang = gi * Math.PI / 4 + t * 0.32;
-        const r0 = F.taichiRadius * 0.38, r1 = F.taichiRadius * 1.08;
-        const r = r0 + u * (r1 - r0);
-        const thick = ((k % 3) - 1) * 0.26;
-        const ca = Math.cos(ang), sa = Math.sin(ang);
-        pose[0] = this.formCX + ca * r - sa * thick;
-        pose[1] = this.formCY + sa * r * 0.92;
-        pose[2] = 0.45 + sa * 0.28 + thick * 0.15;
-        pose[3] = ca; pose[4] = sa * 0.92; pose[5] = 0.12;
-        const tl = Math.hypot(pose[3], pose[4], pose[5]) || 1;
-        pose[3] /= tl; pose[4] /= tl; pose[5] /= tl;
-        pose[6] = 0.52 * (1 + 0.07 * Math.sin(t * 3.1 + gi));
-        pose[7] = 0.70 + 0.22 * Math.sin(t * 2.4 + gi);
-        pose[8] = gi % 2;   // 阴阳门：青 / 紫
+        // 八卦阵：中心阴阳环 + 先天八卦 8 卦绕心排列。
+        // 每卦 = 3 条直爻（初/中/上，内→外），阳爻整条、阴爻中缝断开——
+        // 用剑的排布直接读出"八卦"图形；整体绕阵心缓转，中心跟手。
+        const R0 = F.taichiRadius * 0.21;                          // 中心环
+        const nRing = 108, perRow = 8;                              // 108 环 + 8卦×3爻×8 = 300
+        const rot = t * 0.15;
+        // 先天八卦圆序（乾兑离震坤艮坎巽的爻码，bit0=初爻）：每卦 3 位，1=阳爻连、0=阴爻断
+        const TRIG = [7, 6, 2, 4, 0, 1, 5, 3];
+        if (i < nRing) {
+          const a = (i / nRing) * Math.PI * 2 + rot * 0.6;
+          const r = R0 + Math.sin(t * 2 + i * 0.8) * 0.03;
+          pose[0] = this.formCX + Math.cos(a) * r;
+          pose[1] = this.formCY + Math.sin(a) * r * 0.94;
+          pose[2] = 0.5;
+          pose[3] = -Math.sin(a); pose[4] = Math.cos(a) * 0.94; pose[5] = 0.08;
+          const lc = Math.hypot(pose[3], pose[4], pose[5]) || 1;
+          pose[3] /= lc; pose[4] /= lc; pose[5] /= lc;
+          pose[6] = 0.5;
+          pose[7] = 0.85 + 0.15 * Math.sin(t * 3 + i * 0.3);
+          pose[8] = 2;   // 中心环偏白
+          return;
+        }
+        const idx = i - nRing;
+        const row = idx % 24;                 // 8 卦 × 3 爻
+        const k = Math.floor(idx / 24);       // 爻内序号 0..9
+        const gi = Math.floor(row / 3);       // 卦 0..7
+        const yao = row % 3;                  // 初/中/上爻
+        const yang = (TRIG[gi] >> yao) & 1;
+        // 卦心在半径 2.36 的圆周上，卦符以"直条"绘制：条向=切向，堆叠向=径向（经典八卦图标画法）
+        // 卦符紧凑（0.75×0.86），卦间距 ~1.0，保证 8 个三横卦符各自独立成字
+        const ga = gi * Math.PI / 4 + rot;
+        const Rg = F.taichiRadius * 0.59;
+        const gx = this.formCX + Math.cos(ga) * Rg;
+        const gy = this.formCY + Math.sin(ga) * Rg * 0.94;
+        let tx = -Math.sin(ga), ty = Math.cos(ga) * 0.94;      // 切向（条方向）
+        let ux = Math.cos(ga), uy = Math.sin(ga) * 0.94;       // 径向（爻堆叠方向）
+        const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+        const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+        const tang = (k / (perRow - 1) - 0.5) * 0.75;          // 条内切向偏移（条长 0.75，8 剑密排成实线）
+        let xoff = tang, yoff = (yao - 1) * 0.4;               // 默认阳爻：整条
+        if (!yang) {
+          const half = k < perRow / 2 ? -1 : 1;                // 阴爻：两短条，中缝 0.18
+          const kk = k % (perRow / 2);
+          xoff = half * 0.24 + (kk / (perRow / 2 - 1) - 0.5) * 0.30;
+        }
+        const jit = Math.sin(i * 12.9898) * 0.03;              // 微抖避免死直线
+        pose[0] = gx + tx * (xoff + jit) + ux * yoff;
+        pose[1] = gy + ty * (xoff + jit) + uy * yoff;
+        pose[2] = 0.45 + yao * 0.04;
+        pose[3] = tx; pose[4] = ty; pose[5] = 0.12;            // 剑身沿条方向躺平
+        const l = Math.hypot(pose[3], pose[4], pose[5]) || 1;
+        pose[3] /= l; pose[4] /= l; pose[5] /= l;
+        pose[6] = 0.6;
+        pose[7] = 0.70 + 0.22 * Math.sin(t * 2.4 + row);
+        pose[8] = 0;
         return;
       }
       case 'BIG_SWORD': {
-        // 小剑云团拼成剑形：本地偏移绕指向轴，互不共点
+        // 背景万剑（非剑云成员）：跟手云团缓飞，发射时同向跟随
+        if (i >= this.cloudN) {
+          this._poseOf(i, t, dt, 'IDLE', pose);
+          return;
+        }
+        // 剑云：本地偏移绕指向轴，互不共点
         const R = this._bRight, U = this._bUp, O = this._bOut;
         const lx = this.swx[i], ly = this.swy[i], lz = this.swz[i];
         pose[0] = this.bigX + R.x * lx + U.x * ly + O.x * lz;

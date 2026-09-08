@@ -73,7 +73,12 @@ export class Director {
     const l = Math.hypot(wdx, wdy) || 1; wdx /= l; wdy /= l;
     const [ox, oy] = this.screenToWorld(this.nx, this.ny);
 
-    this.volley.burst(ox, oy, wdx, wdy, e.peak);
+    // 剑指：指哪飞哪——合体剑云整体射出，背景万剑同向跟随，飞出后回手重聚
+    if (this.volley.formation === 'BIG_SWORD') {
+      this.volley.launchCloud(wdx, wdy);
+    } else {
+      this.volley.burst(ox, oy, wdx, wdy, e.peak);
+    }
     this.sparks.burst(ox, oy, 0.9, wdx, wdy);
     this.rings.add(ox, oy);
     this.fovKick = Math.min(1, 0.35 + 0.65 * Math.min(e.peak, 1.6));

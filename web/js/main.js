@@ -28,7 +28,7 @@ const GESTURE_NAMES = {
   OPEN_PALM: '出掌 - 万剑齐发',
   THUMB_UP: '点赞 - 冲天剑柱',
   SHAKA: '六字诀 - 六芒星阵',
-  ROCK: 'Rock - 双龙交织',
+  ROCK: 'Rock（食指+小指）- 双龙交织',
   PALM_DOWN: '下压 - 剑雨倾盆',
   CROSSED_HANDS: '双手交叉 - 8字环',
   HANDS_PUSH: '双手推开 - 爆裂波',
