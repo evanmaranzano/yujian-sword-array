@@ -11,19 +11,20 @@ import { TrailRenderer } from './trail.js';
 // 几何沿 +Z 轴立起（rotation.x = π/2），剑尖在 +Z 顶端。
 export function buildEnergySword(E = FX.energySword) {
   const g = new THREE.Group();
-  const mk = (rT, rB, color, opacity) => {
+  const mk = (rT, rB, color, opacity, layer) => {
     const m = new THREE.Mesh(
       new THREE.CylinderGeometry(rT, rB, E.bladeLength, 8, 1, true),
       new THREE.MeshBasicMaterial({
         color, transparent: true, opacity,
         blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       }));
+    m.userData.layer = layer;   // core|mid|outer（低画质光晕补偿按层调不透明度）
     m.rotation.x = Math.PI / 2;   // 剑刃朝前（圆柱 +Y → +Z）
     return m;
   };
-  g.add(mk(E.coreRadiusTop, E.coreRadiusBottom, E.coreColor, E.coreOpacity));
-  g.add(mk(E.coreRadiusTop * E.midScale, E.coreRadiusBottom * E.midScale, E.midColor, E.midOpacity));
-  g.add(mk(E.coreRadiusTop * E.outerScale, E.coreRadiusBottom * E.outerScale, E.outerColor, E.outerOpacity));
+  g.add(mk(E.coreRadiusTop, E.coreRadiusBottom, E.coreColor, E.coreOpacity, 'core'));
+  g.add(mk(E.coreRadiusTop * E.midScale, E.coreRadiusBottom * E.midScale, E.midColor, E.midOpacity, 'mid'));
+  g.add(mk(E.coreRadiusTop * E.outerScale, E.coreRadiusBottom * E.outerScale, E.outerColor, E.outerOpacity, 'outer'));
   const tip = new THREE.Mesh(
     new THREE.SphereGeometry(E.tipRadius, 8, 8),
     new THREE.MeshBasicMaterial({

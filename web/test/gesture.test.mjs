@@ -107,10 +107,10 @@ test('DOUBLE_FIST: two fists', () => {
   assert.equal(detectGesture(h1, [h1, h2]), G.DOUBLE_FIST);
 });
 
-test('CROSSED_HANDS: wrists close in y, centers close in x', () => {
+test('CROSSED_HANDS: wrists and fingertips reverse x-order', () => {
   const h1 = hand(), h2 = hand();
-  h1[0].x = 0.45; h2[0].x = 0.55;
-  h1[9].x = 0.47; h2[9].x = 0.53;
+  h1[0].x = 0.62; h1[8].x = 0.38; h1[9].x = 0.55; h1[0].y = 0.55;
+  h2[0].x = 0.38; h2[8].x = 0.62; h2[9].x = 0.45; h2[0].y = 0.55;
   assert.equal(detectGesture(h1, [h1, h2]), G.CROSSED_HANDS);
 });
 
@@ -122,12 +122,19 @@ test('HANDS_PUSH: both open, far apart', () => {
 
 test('HANDS_CUP: both palms up, moderate distance', () => {
   const h1 = hand(), h2 = hand();
-  // 掌心向上：腕 y > 中指根 y（y 轴向下为正，这里反过来）
   h1[0].y = 0.6; h1[12].y = 0.4;
   h2[0].y = 0.6; h2[12].y = 0.4;
-  // x 中心差 > 0.15，避免被 CROSSED 抢先
-  h1[0].x = 0.30; h1[9].x = 0.32;
-  h2[0].x = 0.70; h2[9].x = 0.68;
+  h1[0].x = 0.30; h1[9].x = 0.32; h1[12].x = 0.40;
+  h2[0].x = 0.70; h2[9].x = 0.68; h2[12].x = 0.60;
   h1[9].y = 0.5; h2[9].y = 0.5;
+  assert.equal(detectGesture(h1, [h1, h2]), G.HANDS_CUP);
+});
+
+test('HANDS_CUP: horizontal bowl, fingers toward each other', () => {
+  const h1 = hand(), h2 = hand();
+  h1[0].x = 0.28; h1[0].y = 0.55; h1[9].x = 0.34; h1[9].y = 0.52;
+  h1[12].x = 0.44; h1[12].y = 0.52;
+  h2[0].x = 0.72; h2[0].y = 0.55; h2[9].x = 0.66; h2[9].y = 0.52;
+  h2[12].x = 0.56; h2[12].y = 0.52;
   assert.equal(detectGesture(h1, [h1, h2]), G.HANDS_CUP);
 });

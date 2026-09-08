@@ -21,7 +21,6 @@ WEB_FILES = [
     ("web/js/fx/volley.js", "js"),
     ("web/js/gesture.js", "js"),
     ("web/js/main.js", "js"),
-    ("web/js/core/bus.js", "js"),
     ("web/js/fx/audio.js", "js"),
     ("web/js/fx/director.js", "js"),
     ("web/js/fx/environment.js", "js"),
@@ -47,6 +46,7 @@ PY_FILES = [
     ("tests/lock_check.py", "py"),
     ("tests/camera_check.py", "py"),
     ("tests/soak.py", "py"),
+    ("tools/serve.py", "py"),
 ]
 
 
@@ -71,12 +71,15 @@ parts.append(f"""# 隔空御剑 · 万剑归宗 — 完整交付文档
 
 | 版本 | 技术栈 | 定位 |
 |---|---|---|
-| **Web 版（主版本，v4 表现层重构）** | Three.js r185 + MediaPipe Tasks Vision 1.0.1；CC0 glTF 剑模 InstancedMesh；pmndrs/postprocessing 选择性辉光；SlashSaber CC-BY-4.0 ribbon 拖尾；OFL 霞鹜文楷子集 | 展厅部署形态 |
+| **Web 版（主版本，v6b）** | Three.js r185 + MediaPipe Tasks Vision 1.0.1（双手）；程序化能量光剑 ×300 InstancedMesh 三层加色壳；pmndrs/postprocessing 选择性辉光；SlashSaber CC-BY-4.0 ribbon 拖尾；OFL 霞鹜文楷子集 | 展厅部署形态 |
 | Python 版 | pygame + MediaPipe Python + 状态机 | v1 参考实现 + 无头回归/标定载体（视觉冻结，不再跟进重构） |
 
-**视觉（墨韵金辉）**：墨黑穹顶/多层雾融远山/底部云海/月相明月/远雾竖排诗句；
-平时三层「天幕剑阵」在远空缓转（不聚中心球）；锁定时本命剑 z 向纵深飞入手中，
-疾挥则环中调剑 → 雁行集结 → 分波飞越屏幕 → 转向归阵，领头剑带 ribbon 剑气。
+**视觉（sword-control 星空光剑，动画数学复刻 WoyouWoyou/sword-control MIT）**：
+深蓝黑背景 + 白色星空；待机漫天飞剑全屏缓浮；手势阵型——握拳聚三层剑球、剑指合单把大剑
+跟手、出掌瀑布齐发、点赞冲天剑柱、六字诀六芒星（含能量连线）、Rock 双龙（紫链）、下压剑雨、
+双手交叉 8 字环、推开爆裂波、捧起聚能球（随双手距离张合）、双拳太极（白鱼）；
+锁定时本命剑 z 向纵深飞入手中，疾挥则环中调剑 → 雁行集结 → 分波飞越屏幕 → 转向归阵，
+领头剑带 ribbon 剑气。锁定/挥舞/自适应画质为本仓库自有增强。
 
 **交互脑（两版同一算法，lock.js / lock.py）**：手在中心交互区驻留 0.2s 锁定第一个人；
 锁定后帧间位移连续性关联，围观/凑近/交接跳变帧一律拒绝，丢失 0.5s 才释放；
@@ -94,20 +97,26 @@ postprocessing=Zlib、SlashSaber TrailRenderer=CC-BY-4.0、MediaPipe=Apache-2.0�
 ### Web 版
 
 ```bash
-cd web
-python -m http.server 8000 --bind 127.0.0.1
+# 一键启动（serve.py 提供正确 .mjs MIME；http.server 会拒载 MediaPipe 模块）
+web\run_web.bat
+# 或手动：
+python tools/serve.py 8000 --bind 127.0.0.1
 # 浏览器打开 http://127.0.0.1:8000/ ，允许摄像头权限（localhost 只问一次）
 ```
 
-- `?demo=1` 无摄像头演示（脚本化挥手）；`?demo=1&t=1.9` 预滚并冻结在 1.9s（确定性截图）
-- `?debug=1` 显示 FPS/追踪读数、摄像头预览，启用 S 截图/M 镜像；`?kiosk=1` 隐藏指针
+- `?demo=1` 无摄像头演示（脚本化挥手）；`?demo=1&t=11&gesture=FIST` 预滚冻结 + 强制手势阵型（确定性截图；位形阵 t≥11 等齐发剑群归阵）
+- `?debug=1` 显示 FPS/画质档/追踪读数、摄像头预览，启用 S 截图/M 镜像；`?kiosk=1` 隐藏指针
+- `?q=high/low` 强制画质档（默认自适应：降分辨率→关 bloom+光晕壳补偿）
 - `F` 全屏；普通观众界面无任何调试元素
 
 ### 验证（无需摄像头）
 
 ```bash
-# Web：锁/挥舞检测器常驻测试（node 内置 test runner）
-node --test web/test/lock.test.mjs web/test/swipe.test.mjs
+# 一键全量：语法 + node 单测 + Python 回归 + 无头截图
+bash tools/verify_v6.sh
+
+# Web：锁/挥舞/手势分类器常驻测试（node 内置 test runner）
+node --test web/test/*.mjs
 
 # Python：会话锁 19 项断言
 python -m tests.lock_check

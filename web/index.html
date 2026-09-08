@@ -14,16 +14,38 @@
 
   .hud { position: fixed; z-index: 10; pointer-events: none; color: #e7edff; }
 
-  /* 调试读数与摄像头预览：仅 ?debug=1 */
+  /* 摄像头预览 + 手部骨骼（复刻 sword-control：左上角常驻；demo/kiosk 隐藏） */
   #status { top: 3vmin; right: 3vmin; font-size: 14px; color: #96a5c8; opacity: 0;
             text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+  #quality { top: calc(3vmin + 22px); right: 3vmin; font-size: 13px; color: #6fd39a;
+             text-shadow: 0 1px 6px rgba(0,0,0,.9); opacity: 0; }
+  #quality.on { opacity: .85; }
   #status.on { opacity: .85; }
-  #preview { position: fixed; right: 2vmin; bottom: 2vmin; width: 176px; height: 132px;
-             border-radius: 10px; overflow: hidden; opacity: 0; z-index: 10;
-             border: 1px solid rgba(0,170,255,.35); box-shadow: 0 6px 24px rgba(0,0,0,.6); }
-  #preview.on { opacity: .85; }
-  #preview video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-
+  #preview { position: fixed; top: 20px; left: 20px; width: 240px; height: 180px;
+             border: 2px solid rgba(0,255,255,.5); border-radius: 10px; overflow: hidden;
+             z-index: 10; background: rgba(0,0,0,.5); box-shadow: 0 0 20px rgba(0,255,255,.3);
+             display: none; pointer-events: none; }
+  #preview.on { display: block; }
+  #preview video, #preview canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+             object-fit: cover; transform: scaleX(-1); }
+  #preview canvas { pointer-events: none; }
+  #gesture-status { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+             padding: 12px 36px; background: rgba(0,20,40,.8); border: 1px solid rgba(0,255,255,.4);
+             border-radius: 30px; z-index: 10; backdrop-filter: blur(10px);
+             box-shadow: 0 0 30px rgba(0,100,255,.3); display: none; pointer-events: none; }
+  #gesture-status.on { display: block; }
+  #gesture-text { color: #00ffff; font-size: 18px; font-weight: 500; letter-spacing: 2px;
+             text-shadow: 0 0 10px rgba(0,255,255,.8); }
+  body.kiosk #preview, body.kiosk #gesture-status, body.kiosk #gesture-guide { display: none !important; }
+  #gesture-guide { position: fixed; left: 20px; bottom: 18px; z-index: 10; pointer-events: none;
+             display: none; color: rgba(170,210,240,.48); font-size: 12px; line-height: 1.5;
+             letter-spacing: .04em; text-shadow: 0 1px 8px rgba(0,0,0,.9); }
+  #gesture-guide.on { display: block; }
+  #gesture-guide .cap { color: rgba(0,255,255,.4); font-size: 10px; letter-spacing: .22em;
+             margin-bottom: 5px; }
+  #gesture-guide .g { white-space: nowrap; }
+  #gesture-guide .g b { font-weight: 500; color: rgba(190,230,255,.62); }
+  #gesture-guide .g.on, #gesture-guide .g.on b { color: #00ffff; }
   /* 加载 / 故障遮罩 */
   .overlay { position: fixed; inset: 0; z-index: 20; display: none;
              align-items: center; justify-content: center; flex-direction: column;
@@ -56,7 +78,23 @@
 <div id="app"></div>
 
 <div id="status" class="hud"></div>
-<div id="preview"></div>
+<div id="quality" class="hud"></div>
+<div id="preview"><canvas id="hand-canvas"></canvas></div>
+<div id="gesture-status"><span id="gesture-text">等待检测手势...</span></div>
+<div id="gesture-guide">
+  <div class="cap">手势</div>
+  <div class="g" data-k="FIST"><b>握拳</b>　万剑聚拢</div>
+  <div class="g" data-k="TWO_FINGERS"><b>剑指</b>　万剑成剑</div>
+  <div class="g" data-k="OPEN_PALM"><b>出掌</b>　万剑齐发</div>
+  <div class="g" data-k="THUMB_UP"><b>点赞</b>　冲天剑柱</div>
+  <div class="g" data-k="SHAKA"><b>六字诀</b>　六芒星</div>
+  <div class="g" data-k="ROCK"><b>Rock</b>　双龙交织</div>
+  <div class="g" data-k="PALM_DOWN"><b>下压</b>　剑雨倾盆</div>
+  <div class="g" data-k="CROSSED_HANDS"><b>双手交叉</b>　8字环</div>
+  <div class="g" data-k="HANDS_PUSH"><b>双手推开</b>　爆裂波</div>
+  <div class="g" data-k="HANDS_CUP"><b>双手捧起</b>　聚能球</div>
+  <div class="g" data-k="DOUBLE_FIST"><b>双拳</b>　八卦阵</div>
+</div>
 
 <div id="loading" class="overlay on">
   <div class="spinner"></div>

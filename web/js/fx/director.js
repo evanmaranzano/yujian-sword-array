@@ -1,12 +1,12 @@
 // FX 导演：交互层只发归一化事件，导演负责全部表现编排（docs/04 §5.2）。
-// 三态：idle（天幕剑阵自演）→ candidate（金环收敛）→ locked（本命剑/跟手/齐发）。
+// 三态：idle（天幕剑阵自演）→ candidate（驻留确认）→ locked（本命剑/跟手/齐发）。
+// 锁定光圈已去掉：有人时默认剑阵中心跟手。
 import * as THREE from 'three';
 import { FX } from '../fx.config.js';
 import { Environment } from './environment.js';
 import { Volley } from './volley.js';
 import { HeroSword } from './hero.js';
 import { SparkField, Shockwaves } from './particles.js';
-import { Reticle } from './reticle.js';
 import { Sfx } from './audio.js';
 
 const CAM_Z = 14, BASE_FOV = 50;
@@ -22,7 +22,6 @@ export class Director {
     this.hero = new HeroSword(scene);
     this.sparks = new SparkField(scene);
     this.rings = new Shockwaves(scene);
-    this.reticle = new Reticle(scene);
     this.sfx = new Sfx();
 
     this.phase = 'idle';
@@ -55,17 +54,19 @@ export class Director {
     this.cand = s.cand;
     this.present = s.present;
     this.nx = s.nx; this.ny = s.ny; this.speed = s.speed;
+    this.s2 = s;   // 手势上下文（dir/normal/hand2/handsCenter/handDist）
 
     // acquired 边沿（candidate→locked）
     if (prev === 'candidate' && this.phase === 'locked') {
       const [wx, wy] = this.screenToWorld(this.nx, this.ny);
       this.hero.summon(wx, wy);
-      this.reticle.acquire(wx, wy);
       this.sfx.chime();
     }
   }
 
   onSwipe(e) {
+    // 瀑布（OPEN_PALM）本身就是持续的齐发，挥手触发会让剑群互相拉扯，整段屏蔽
+    if (this.volley.formation === 'WATERFALL') return;
     // 宽高比校正（修 docs/04 M-ANGLE：视频 4:3 归一化 → 世界各向异性方向）
     const a = this.camera.aspect;
     let wdx = e.dx * a, wdy = -e.dy;
@@ -90,24 +91,62 @@ export class Director {
     };
     const out = [
       this.volley.mesh, this.volley.meshMid, this.volley.meshOuter,
+      ...leaves(this.volley.bigSword, []),
+      ...this.volley.hexLines,
       ...this.volley.trails.map(t => t.mesh),
       ...leaves(this.hero.group, []),
       this.hero.trail.mesh,
       this.sparks.pts,
       ...this.rings.items.map(i => i.mesh),
-      this.reticle.ring, this.reticle.ringThin, this.reticle.dot, this.reticle.seal,
     ];
     return out;
+  }
+
+  // 低画质（bloom 关闭）光晕补偿：加厚三处能量剑的光晕壳不透明度，补回泛光损失
+  applyLowGlow(on) {
+    if (this._lowGlow === !!on) return;
+    this._lowGlow = !!on;
+    const E = FX.energySword, L = FX.energySwordLow;
+    const mid = this._lowGlow ? L.midOpacity : E.midOpacity;
+    const outer = this._lowGlow ? L.outerOpacity : E.outerOpacity;
+    const apply = (group) => {
+      group.traverse(o => {
+        if (!o.isMesh) return;
+        if (o.userData.layer === 'mid') o.material.opacity = mid;
+        else if (o.userData.layer === 'outer') o.material.opacity = outer;
+      });
+    };
+    apply(this.hero.group);
+    apply(this.volley.bigSword);
+    this.volley.meshMid.material.opacity = mid;
+    this.volley.meshOuter.material.opacity = outer;
   }
 
   update(dt, t) {
     this.env.update(dt, t);
 
     const [wx, wy] = this.screenToWorld(this.nx, this.ny);
-    this.hero.update(dt, t, { x: wx, y: wy, present: this.present });
+    // 手势上下文注入（第二只手/双手中心/指向/掌法向，世界坐标）
+    let hand2w = null, hcw = null;
+    if (this.s2) {
+      if (this.s2.hand2) {
+        const [h2x, h2y] = this.screenToWorld(this.s2.hand2.x, this.s2.hand2.y);
+        hand2w = { x: h2x, y: h2y };
+      }
+      if (this.s2.handsCenter) {
+        const [hcx, hcy] = this.screenToWorld(this.s2.handsCenter.x, this.s2.handsCenter.y);
+        hcw = { x: hcx, y: hcy };
+      }
+    }
+    this.volley.setHands({ x: wx, y: wy }, hand2w, hcw,
+      this.s2?.handDist, this.s2?.dir, this.s2?.normal);
 
-    this.volley.update(dt, t, this.phase === 'locked');
-    // 手势阵型跟随手位（无手时保持上次锚点）
+    // BIG_SWORD 时本命剑退场让位（0.6s 宽限抗手势抖动）
+    const heroHere = this.present && this.volley.formation !== 'BIG_SWORD';
+    this.hero.update(dt, t, { x: wx, y: wy, present: heroHere });
+
+    this.volley.update(dt, t, this.present || this.phase === 'candidate');
+    // 手势阵型切换（即时跟手；无手时保持上次锚点）
     if (this.present) this.volley.setMode(this._gesture || 'IDLE', { x: wx, y: wy });
 
     // 本命剑高速移动：沿轨迹迸青蓝星火（替代旧的喷射小剑）
@@ -127,9 +166,7 @@ export class Director {
     this.sparks.update(dt);
     this.rings.update(dt);
 
-    // 锁定光标
-    if (this.phase === 'idle') this.reticle.update(dt, t, 'idle', 0, wx, wy);
-    else this.reticle.update(dt, t, this.phase, this.cand, wx, wy);
+
 
     // 镜头：呼吸 + 齐发 FOV punch（连续缓动，不用白噪震屏）
     const breath = FX.cameraBreath;

@@ -52,31 +52,32 @@ export const FX = {
     tipOpacity: 0.8,
   },
 
-  // 手势阵型（volley.js 状态机；手位为中心锚点，世界坐标）
+  // 低画质（bloom 关闭时）光晕补偿：加厚光晕壳不透明度，补回泛光损失
+  energySwordLow: { midOpacity: 0.44, outerOpacity: 0.30 },
+
+  // 手势阵型（volley.js；有人时中心跟手）
   formations: {
-    lerpK: 7,            // 位置吸附速率（1/s，帧率无关 exp 阻尼）
-    sphereRadius: 3.4,   // SPHERE/ENERGY_BALL 斐波那契球半径
-    bigSwordScale: 6.5,  // BIG_SWORD 合并大剑缩放
-    bigSwordOffset: 1.6, // 大剑悬于手上方的偏移
-    pillarRadius: 1.6,   // PILLAR 剑柱半径
-    pillarHeight: 14,    // PILLAR 剑柱高度
-    hexRadius: 4.2,      // HEXAGRAM 六芒星外接圆半径
-    dragonRadius: 2.4,   // DRAGON 双螺旋半径
-    dragonHeight: 12,    // DRAGON 双螺旋高度
-    rainWidth: 10,       // RAIN 剑雨覆盖宽度
-    rainFallSpeed: 11,   // RAIN 下落速度
+    lerpK: 5.2,          // 位置吸附速率（≈原版 lerp 0.085@60fps，帧率无关 exp 阻尼）
+    bigSwordScale: 0.32, // 剑指云团里单把小剑缩放（不再合并成一把）
+    bigSwordOffset: 0,   // 剑云原点即手位
+    pillarRadius: 1.5,   // PILLAR 剑柱半径（原版 1.5）
+    pillarHeight: 15,    // PILLAR 剑柱高度（原版 15）
+    hexRadius: 4,        // HEXAGRAM 六芒星外接圆半径（原版 4）
+    dragonRadius: 2.5,   // DRAGON 双螺旋半径（原版 2.5）
+    dragonHeight: 12,    // DRAGON 双螺旋高度（原版 12）
     rainGroundY: -6,     // RAIN 落地回顶阈值
-    infinityScaleX: 5.5, // INFINITY 8字水平半径
-    infinityScaleY: 2.6, // INFINITY 8字垂直幅度
-    infinityScaleZ: 1.6, // INFINITY 8字纵深幅度
-    explodeSpeed: 13,    // EXPLODE 扩散速度
-    explodeMaxR: 13,     // EXPLODE 最大扩散半径
-    taichiRadius: 3.8,   // TAICHI 双鱼半径
-    taichiTilt: Math.PI / 5,  // TAICHI 盘面倾角（面向观众）
+    infinityScaleX: 6,   // INFINITY 8字水平半径（原版 6）
+    infinityScaleY: 4,   // INFINITY 8字垂直幅度（原版 4）
+    infinityScaleZ: 3,   // INFINITY 8字纵深幅度（原版 3）
+    explodeMaxR: 15,     // EXPLODE 最大扩散半径（原版 15）
+    taichiRadius: 4,     // TAICHI 双鱼半径（原版 4）
+    taichiTilt: Math.PI / 5,  // TAICHI 盘面倾角（面向观众；原版 π/1.5）
+    waterfallSpeed: 42,  // WATERFALL 出掌飞剑速度（≈原版 0.8/frame）
   },
 
-  // 手势识别稳定性：同一手势连续保持该时长后才切换阵型
-  gestureStableMs: 500,
+  // 手势识别稳定性：同一手势连续保持该时长后才切换阵型（原版即时切换；
+  // 250ms 折中——近实时手感，又滤掉单帧误检）
+  gestureStableMs: 250,
 
   // 本命剑
   hero: {
@@ -94,11 +95,25 @@ export const FX = {
   ringMaxRadius: 3.4,
   ringLife: 0.4,
 
-  // 后处理（选择性辉光：只让剑/法阵发光，山月不入 bloom；v5 降过曝）
-  bloom: { intensity: 0.75, luminanceThreshold: 0.18, luminanceSmoothing: 0.15, radius: 0.6 },
+  // 后处理（选择性辉光：只让剑/法阵发光，山月不入 bloom）。
+  // v6 再治过曝：阈值 0.18→0.45（叠层加色不再整体泛白），强度 0.75→0.6
+  bloom: { intensity: 0.6, luminanceThreshold: 0.45, luminanceSmoothing: 0.2, radius: 0.55 },
   vignette: { offset: 0.35, darkness: 0.72 },
   grain: 0.04,
   exposure: 0.72,
+
+  // 自适应画质（CPU-only 笔记本兜底，main.js 消费）：
+  // 连续低于 downFps 先降渲染分辨率，降到 resScaleMin 仍低则关 bloom（低画质下加厚光晕层补偿）
+  quality: {
+    resScaleMax: 1.0,
+    resScaleMin: 0.55,
+    resStep: 0.12,
+    downFps: 45,
+    upFps: 57,
+    holdDownMs: 2000,   // 低于 downFps 持续此时长才降级
+    holdUpMs: 8000,     // 高于 upFps 持续此时长才升级
+    sampleMs: 500,      // FPS 采样窗口
+  },
 
   // 相机
   cameraBreath: 0.12,

@@ -86,8 +86,57 @@ function palmSize(lm) {
   return Math.hypot(dx, dy);
 }
 
+// 掌心（5 点平均，PALM_IDS）
+function palmCenter(lm) {
+  let x = 0, y = 0;
+  for (const id of PALM_IDS) { x += lm[id].x; y += lm[id].y; }
+  return [x / PALM_IDS.length, y / PALM_IDS.length];
+}
+
+// One-Euro 自适应低通（Casiez et al. 2012）：慢速时强滤波杀 landmark 抖动，
+// 快速时自动放宽带宽保跟手。只作用于显示路径（published nx/ny），
+// 挥舞检测仍吃原始已接受帧，速度计算不受滤波畸变影响。
+class OneEuro2D {
+  constructor(minCutoff = 1.1, beta = 0.55, dCutoff = 1.0) {
+    this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+    this.reset();
+  }
+  static _alpha(cutoff, dt) {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return tau / (tau + dt);
+  }
+  reset() {
+    this._px = null; this._py = null; this._pt = 0;
+    this._dx = 0; this._dy = 0;   // 滤波后的速度幅值（用于抬带宽）
+  }
+  filter(x, y, t) {
+    if (this._px === null) {
+      this._px = x; this._py = y; this._pt = t; this._dx = 0; this._dy = 0;
+      return [x, y];
+    }
+    const dt = Math.max(t - this._pt, 1e-3);
+    const fx = this._step('x', x, t, dt);
+    const fy = this._step('y', y, t, dt);
+    this._pt = t;
+    return [fx, fy];
+  }
+  _step(axis, v, t, dt) {
+    const prev = axis === 'x' ? this._px : this._py;
+    const rawD = Math.abs((v - prev) / dt);
+    const ad = OneEuro2D._alpha(this.dCutoff, dt);
+    const dHat = (axis === 'x' ? this._dx : this._dy) + ad * (rawD - (axis === 'x' ? this._dx : this._dy));
+    if (axis === 'x') this._dx = dHat; else this._dy = dHat;
+    const cutoff = this.minCutoff + this.beta * Math.hypot(this._dx, this._dy);
+    const a = OneEuro2D._alpha(cutoff, dt);
+    const out = prev + a * (v - prev);
+    if (axis === 'x') this._px = out; else this._py = out;
+    return out;
+  }
+}
+
 export class HandTracker {
   constructor({ demo = false, prerollTo = 0, onSwipe, onState, onHealth, onGesture } = {}) {
+    this.demo = demo;             // v6 修复：原漏赋值，demo/无头截图一直走真相机路径然后 ENGINE FAILED
     this.onSwipe = onSwipe || (() => {});
     this.onState = onState || (() => {});
     this.onHealth = onHealth || (() => {});
@@ -100,6 +149,12 @@ export class HandTracker {
     this.prerollTo = prerollTo;   // >0：演示模式确定性预滚（无头截图用）
     this.lock = new HandLock();
     this.detector = new SwipeDetector();
+    this.oe = new OneEuro2D();      // 显示路径平滑（nx/ny），挥舞检测不经过它
+    // 手势上下文（指向方向/掌法向/第二只手/双手中心，镜像坐标系）
+    this.dirX = 0; this.dirY = 1; this.dirZ = 0;
+    this.palmNX = 0; this.palmNY = 0; this.palmNZ = 1;
+    this.hand2Nx = null; this.hand2Ny = null;
+    this.ncx = 0.5; this.ncy = 0.5; this.handDist = 0.3;
     this.landmarker = null;
     this.video = null;
     this.stream = null;
@@ -118,6 +173,8 @@ export class HandTracker {
     this.status = 'init';
     // 每帧输出的瞬时运动（归一化坐标/秒，已镜像）
     this.speed = 0; this.vx = 0; this.vy = 0;
+    this.rawHands = [];         // 未镜像的 MediaPipe 点，专供摄像头预览骨骼
+
   }
 
   // 相机/引擎故障后重新初始化（H7 自动重试）
@@ -128,7 +185,7 @@ export class HandTracker {
     this._retries = Math.min(this._retries + 1, 8);
     await new Promise(r => setTimeout(r, Math.min(8000, 600 * 2 ** this._retries)));
     this.lastVideoTime = -1; this._lastFrameMs = -1; this.stalled = false;
-    this.lock.reset(); this.detector.reset();
+    this.lock.reset(); this.detector.reset(); this.oe.reset();
     this.present = false; this.sx = this.sy = null;
     return this.start();
   }
@@ -137,8 +194,10 @@ export class HandTracker {
   resetSession() {
     this.lock.reset();
     this.detector.reset();
+    this.oe.reset();
     this.present = false;
     this.sx = this.sy = null;
+    this.hand2Nx = null; this.handDist = 0.3;
     this._gCandidate = GESTURE.IDLE; this._gPublished = GESTURE.IDLE;
   }
 
@@ -157,15 +216,17 @@ export class HandTracker {
       const vision = await FilesetResolver.forVisionTasks('./vendor/mediapipe/wasm');
       const make = (delegate) => HandLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: './vendor/mediapipe/hand_landmarker.task', delegate },
-        runningMode: 'VIDEO', numHands: 1,
+        runningMode: 'VIDEO', numHands: 2,   // 双手手势（sword-control maxNumHands 2）
         minHandDetectionConfidence: 0.5, minHandTrackingConfidence: 0.7,
       });
       try { this.landmarker = await make('GPU'); }
       catch (e) { console.warn('GPU delegate 失败，回退 CPU', e); this.landmarker = await make('CPU'); }
       this.status = 'camera';
 
+      // 640×480：MediaPipe 内部会把输入缩到模型分辨率，高分辨率请求只增加
+      // 采集/传输开销，对精度无益；CPU-only 笔记本上 720p 采集是白烧 CPU（sword-control 实证）
       this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
       });
       this.video = document.createElement('video');
       this.video.srcObject = this.stream;
@@ -212,16 +273,32 @@ export class HandTracker {
       try {
         const res = this.landmarker.detectForVideo(this.video, nowMs);
         if (res.landmarks && res.landmarks.length) {
-          this._updateGesture(now, res.landmarks);
-          const lm = res.landmarks[0];
-          let x = 0, y = 0;
-          for (const id of PALM_IDS) { x += lm[id].x; y += lm[id].y; }
-          x /= PALM_IDS.length; y /= PALM_IDS.length;
-          const mx = CFG.mirror ? 1 - x : x;
-          out = this.lock.update(now, true, mx, y, palmSize(lm));
+          // 预览骨骼用原始（未镜像）点；逻辑链路仍走镜像坐标
+          this.rawHands = res.landmarks.map(h => h.map(p => ({ x: p.x, y: p.y })));
+          // 统一镜像坐标：位置/手势/方向共用同一坐标系（只翻 x）
+          const hands = res.landmarks.map(lms =>
+            lms.map(p => ({ x: CFG.mirror ? 1 - p.x : p.x, y: p.y, z: p.z })));
+          // 锁定手优选：双手时取离上一接受位置最近的手排第一
+          //（MediaPipe 输出顺序会在两手间跳，会话锁要求连续）
+          let locked = hands[0];
+          if (hands.length > 1 && this.sx !== null) {
+            const d = (h) => {
+              const [px, py] = palmCenter(h);
+              return Math.hypot(px - this.sx, py - this.sy);
+            };
+            locked = d(hands[0]) <= d(hands[1]) ? hands[0] : hands[1];
+          }
+          const other = hands.find(h => h !== locked) || null;
+          const ordered = other ? [locked, other] : [locked];
+          this._updateGesture(now, ordered);
+          this._updateHandContext(locked, other);
+          const [px, py] = palmCenter(locked);
+          out = this.lock.update(now, true, px, py, palmSize(locked));
         } else {
+          this.rawHands = [];
           out = this.lock.update(now, false, 0, 0, null);
           this._updateGesture(now, null);
+          this.hand2Nx = null;
         }
       } catch (e) {
         // 单帧推理失败不应杀死 rAF 链（docs/02 H2）；报健康态，下帧重试
@@ -241,6 +318,30 @@ export class HandTracker {
     }
     if (this.stalled && gotFrame) { this.stalled = false; this.onHealth({ state: 'ok', msg: '' }); }
     this._publish(now);
+  }
+
+  // 手势上下文：指向方向（腕→中指尖）、掌法向（食指根×小指根）、双手中心/间距
+  //（sword-control updateHandTransform 同款，坐标系已镜像）
+  _updateHandContext(locked, other) {
+    const w = locked[0], mt = locked[12];
+    const dx = mt.x - w.x, dy = mt.y - w.y, dz = mt.z - w.z;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    this.dirX = -dx / dl; this.dirY = -dy / dl; this.dirZ = -dz / dl;   // 原版取反（y-up 语义）
+    const ib = locked[5], pb = locked[17];
+    const v1x = ib.x - w.x, v1y = ib.y - w.y, v1z = ib.z - w.z;
+    const v2x = pb.x - w.x, v2y = pb.y - w.y, v2z = pb.z - w.z;
+    const nx = v1y * v2z - v1z * v2y;
+    const ny = v1z * v2x - v1x * v2z;
+    const nz = v1x * v2y - v1y * v2x;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    this.palmNX = nx / nl; this.palmNY = ny / nl; this.palmNZ = nz / nl;
+    if (other) {
+      this.hand2Nx = (other[0].x + other[9].x) / 2;
+      this.hand2Ny = (other[0].y + other[9].y) / 2;
+      this.ncx = (locked[9].x + other[9].x) / 2;
+      this.ncy = (locked[9].y + other[9].y) / 2;
+      this.handDist = Math.abs(locked[9].x - other[9].x);
+    }
   }
 
   // 手势分类（gesture.js）→ 稳定 gestureStableMs 后上报 onGesture（阵型切换防抖）。
@@ -277,7 +378,11 @@ export class HandTracker {
 
   // 发布状态给主循环（真机每 rAF、脚本每次注入）
   _publish(now) {
-    const px = this.sx ?? 0.5, py = this.sy ?? 0.5;
+    const rawX = this.sx ?? 0.5, rawY = this.sy ?? 0.5;
+    // 显示坐标过 One-Euro：慢速强滤波（阵型锚点不抖），快速自动放宽带宽（跟手不迟滞）
+    let nx, ny;
+    if (this.present) { [nx, ny] = this.oe.filter(rawX, rawY, now); }
+    else { this.oe.reset(); nx = rawX; ny = rawY; }
     // 瞬时速度：从已接受帧历史取最近两点差分；手不在场或被拒帧空档归零（不再发布冻结速度）
     if (this.present && this.detector.hist.length >= 2 &&
         now - (this._lastAcceptedT ?? now) <= CFG.velocityWindow) {
@@ -292,7 +397,12 @@ export class HandTracker {
     }
     this.onState({
       present: this.present, phase: this.phase, cand: this.cand,
-      nx: px, ny: py, vx: this.vx, vy: this.vy, speed: this.speed, stalled: this.stalled,
+      nx, ny, vx: this.vx, vy: this.vy, speed: this.speed, stalled: this.stalled,
+      dir: { x: this.dirX, y: this.dirY, z: this.dirZ },
+      normal: { x: this.palmNX, y: this.palmNY, z: this.palmNZ },
+      hand2: (this.present && this.hand2Nx !== null) ? { x: this.hand2Nx, y: this.hand2Ny } : null,
+      handsCenter: { x: this.ncx, y: this.ncy },
+      handDist: this.handDist,
     });
   }
 

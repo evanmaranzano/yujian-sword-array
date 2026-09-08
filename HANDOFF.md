@@ -1,7 +1,19 @@
 # 交接文档（HANDOFF）
 
 > 写给一个完全没有上下文的新会话。读完本文件即可继续工作。
-> 最后更新：2026-09-05（v4 验证 ALL VERIFIED + IDM/compose 两修复，见 8.6）
+> 最后更新：2026-09-08（v6c：跟手阵心、剑指小剑云团、摄像头骨骼 HUD、八卦八门、捧起判定，见 9.7）
+
+---
+
+## 0. 当前状态速览（2026-09-08，以本节为准，历史章节仅备查）
+
+- **是什么**：展厅实时手势御剑「隔空御剑 · 万剑归宗」Web 版（Three.js + MediaPipe，纯本地离线），Python v1 备用版仅作无头回归/标定载体。
+- **在哪**：`C:\Users\Administrator\Desktop\yujian-v6-work`（git = GitHub `evanmaranzano/yujian-sword-array`）。
+- **版本**：v6c。底座仍是 sword-control 手势/阵型 + 三件自有增强（会话锁、挥手齐发、自适应画质）。相对 v6b 的用户向改动：有人时阵型中心跟手（无锁定光圈）；剑指=300 把小剑拼剑形（互不共点）；左上角摄像头+骨骼、底部手势名、左下角手势表（`?kiosk=1` / `?demo=1` 隐藏）；双拳=八卦八门；双手捧起改为张开+指尖内扣（不再被「交叉」抢走）。无人待机仍是漫天飞剑。
+- **怎么跑**：`web\run_web.bat`（必须 `tools/serve.py`，Chrome 优先全屏）。勿用 `python -m http.server`（.mjs MIME 拒载 MediaPipe）。本机摄像头 Logi C270。
+- **怎么验**：`node --test web/test/*.mjs`（手势 13 + 锁 8 + 挥舞 4）；Python `.venv`：`lock_check` / `smoke` / `camera_check --selftest`；阵型截图 `?demo=1&t=11&gesture=<名>`。`bash tools/verify_v6.sh` 一键（含无头截图）。
+- **机器**：Win11 / Administrator；Python 一律项目根 `.venv`（勿用 Anaconda）；node v22.23.2；浏览器优先 Chrome。
+- **等什么**：现场标定（H4/H8，venv 尚未装 mediapipe）→ kiosk 部署（H3）→ 72h 烤机。
 
 ---
 
@@ -15,12 +27,11 @@
 - "人类都可以"（含儿童、身高跨度大）；**往哪挥手剑光往哪飞**；纯特效无玩法
 - 仙侠"万剑归宗"风格；版权归甲方公司
 
-**工作方式（Autocase 平台本地任务，务必遵守）**：
+**工作方式**：
 
-- 任务产物由**用户本人**在 Autocase 评测页上传并提交评测。**不要**用 curl/TOS 上传，不要读取/打印/展示平台凭据，会话 JSONL 由平台 Hook 自动备份。
-- 需要用户操作时直接在 TUI 里问。
-- 工作区：`C:\Users\Administrator\Desktop\gaze\隔空御剑`（**2026-09-05 起，已从 26566 旧机拷到 Administrator 新机**；**不是 git 仓库**，改动无版本控制兜底，谨慎）。
-- 附件 `…/attachments/01-zip` 是本工作区的同内容 zip（已逐文件 diff 验证一致），**不要再解压进工作区**（我曾解压到 `_attachment/` 做比对后已删除）。
+- 当前工作区：`C:\Users\Administrator\Desktop\yujian-v6-work`（2026-09-08 起；GitHub `evanmaranzano/yujian-sword-array` 的 git clone，**是 git 仓库**）。历史工作区 `Desktop\yujian44.5new\隔空御剑`（v4 旧副本）与 `Desktop\gaze\隔空御剑`（v4 时代路径，已不存在）均勿再用。
+- **改动暂未 commit/push**（用户验收后推 GitHub）；参考仓 `Desktop\_ref-sword-control`（WoyouWoyou/sword-control MIT，只读参考，勿改）。
+- 历史工作方式（Autocase 平台本地任务）：产物由用户本人在评测页上传，勿用 curl/TOS 上传、勿读平台凭据。
 
 **任务阶段**：
 1. 第一轮：纯文档现状审查（`docs/01-现状审查与待确认清单.md`，含甲方口头答复）→
@@ -32,31 +43,30 @@
 
 ---
 
-## 2. 代码库地图
+## 2. 代码库地图（v6b 现状）
 
-两套实现，**语义不等价**，改动通常要两版同步：
+两套实现，**语义不等价**；交互阈值（config.js/config.py）两版同值，表现层 Web 独走：
 
 | 部分 | 文件 | 说明 |
 |---|---|---|
-| Web 主版本（部署形态，v2/v3） | `web/index.html`、`web/js/{config,lock,tracking,swords,scene,main}.js` | Three.js r185 + MediaPipe tasks-vision 1.0.1，全部本地 `web/vendor/`；**上升沿触发**齐发；本命剑弹簧跟手+轨迹剑光+万剑齐发三通道 |
-| Python 备用版（v1） | `yujian/{config,lock,tracker,swipe,effects,audio,main}.py` | pygame+mediapipe+opencv；**收手后**按起点→终点位移触发（有 SWIPE_MIN_DIST 门槛）；单通道 2D |
-| 测试 | `tests/smoke.py`（无头断言）、`tests/lock_check.py`（锁 19 项断言）、`tests/camera_check.py`（**已重写**：3/4/5m 现场标定工具 + `--selftest` 合成自检，退出码 0/1/2）、`tests/soak.py`（无头烤机：帧率/容量/会话/齐发计数/内存，本次新增） |
-| 文档 | `docs/01-现状审查与待确认清单.md`、`docs/02-多代理深度只读审查报告.md`（**下一步工作的权威清单**）、`隔空御剑-完整交付.md`（build_delivery.py 生成物）、两级 README |
-| 工具 | `tools/build_delivery.py`（把源码嵌进交付 md；**改源码后要重跑**） |
+| Web 主版本（部署形态，v6b） | `web/index.html`、`web/js/{config,fx.config,gesture,lock,tracking,main}.js`、`web/js/fx/{audio,director,environment,hero,particles,postfx,reticle,trail,volley}.js` | Three.js r185 + MediaPipe tasks-vision（双手）+ postprocessing 选择性辉光，全本地 `web/vendor/`；表现层动画复刻 sword-control（见 §9.6） |
+| Python 备用版（v1） | `yujian/{config,lock,tracker,swipe,effects,audio,main}.py` | pygame+mediapipe+opencv；收手后位移触发；无头回归/标定载体（视觉冻结） |
+| 测试 | `web/test/{gesture,lock,swipe}.test.mjs`（node 单测 12+8+4）、`tests/smoke.py`、`tests/lock_check.py`（19 断言）、`tests/camera_check.py`（现场标定工具+--selftest）、`tests/soak.py`（无头烤机） |
+| 文档 | `HANDOFF.md`（本文件，权威入口）、`docs/01-05`（历史审查报告）、`隔空御剑-完整交付.md`（build_delivery.py 生成物）、README |
+| 工具 | `tools/serve.py`（**启动必须用它**，http.server 的 .mjs MIME 会拒载 MediaPipe）、`tools/build_delivery.py`（改源码后重跑交付 md）、`tools/verify_v6.sh`（一键全量验证） |
 
-运行/测试命令（详见两级 README）：
+运行/验证：
 
 ```bash
-# Web：cd web && python -m http.server 8000 → http://localhost:8000/ （?demo=1 无摄像头演示，&t=秒 预滚截图）
-# Python 无头 smoke：
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python -m tests.smoke
-# 会话锁确定性测试（无需摄像头，需 pygame 包：经 tests.smoke 间接 import）：
-python -m tests.lock_check
-# 标定工具自检（合成数据，不碰摄像头，本机 3.14 可跑）/ 无头烤机：
-python -m tests.camera_check --selftest
-python -m tests.soak --seconds 20
-# 真机现场标定（需 3.12 venv + 摄像头；指标写 tests/calib_log.csv）：
-python -m tests.camera_check --label 4m-adult --duration 30 --require-hand
+web\run_web.bat            # 一键启动（serve.py + Chrome 优先全屏）
+# 无头截图（位形阵 t≥11 等齐发剑群归阵；动态阵中途冻结）：
+#   http://127.0.0.1:8000/?demo=1&t=11&gesture=TWO_FINGERS
+bash tools/verify_v6.sh    # 语法 + node 单测 + Python 回归 + 13 张无头截图
+# Python 无头回归（.venv 已含 pygame-ce/opencv/numpy）：
+.venv/Scripts/python.exe -m tests.lock_check
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy .venv/Scripts/python.exe -m tests.smoke
+# 真机现场标定（需摄像头；指标写 tests/calib_log.csv）：
+.venv/Scripts/python.exe -m tests.camera_check --label 4m-adult --duration 30 --require-hand
 ```
 
 ---
@@ -115,19 +125,29 @@ python -m tests.camera_check --label 4m-adult --duration 30 --require-hand
 
 ## 4. 当前卡在哪 / 状态
 
-**不卡。C1 已交付验证；H1（标定工具 + 烤机脚本）已完成并验证（见 3.3）。** 工具链已就绪，但**现场数据仍为零**——3/4/5m 实测必须在有摄像头的 Python 3.12 venv + 真机/现场跑 `camera_check`（标签化采集到 tests/calib_log.csv）。
+## 4. 当前卡在哪 / 状态（2026-09-08）
 
-**下一轮方向已被用户评审改变（见第 7 节，最高优先级）**：不再按 docs/03 P0 继续修后端，而是启动**第四轮多代理 workflow：系统调研可借鉴的开源前端项目（手势御剑/光剑特效/剑阵），产出对比与借鉴方案，然后整体重构前端**（用户认为当前前端"太丑"）。docs/03 的 L1/H2/H7/H3/H6/H5/H4 技术债在重构后仍有效，排序让位。
+**不卡，等用户真机复验。** v6b 已完成：剑指过曝/光柱修复、手势判定与阵型逐项复刻 sword-control、
+待机漫天飞剑、自适应画质（CPU-only 兜底）、demo/无头模式与 .mjs MIME 两个历史阻断修复；
+node 24/24、lock_check 19、smoke、camera_check selftest、soak、13 张阵型截图全部通过。
 
-docs/03 第七节有完整 P0/P1/P2 路线图和建议验收基线（检测率≥95%、端到端≤150ms、误触≤1次/5min、≥55fps、72h 烤机、双人 10min 误夺控 0 次）。
+**已具备但未验证**：本机有摄像头（Logi C270 HD WebCam，09-08 核实——旧记录"无摄像头使用条件"
+作废；浏览器端 MediaPipe 可直接真机试）。用户已在 Edge/Chrome 各体验过一轮并给出两轮反馈。
 
-**未做真机验证**：本机无摄像头使用条件、无 mediapipe（见坑 1），camera_check 真机路径与 soak 长烤未在真机跑过（soak 仅 16s 无头短跑验证）；3–5m 两人入画必须等现场真机。
+**下一步排序**：
+1. 用户真机复验 v6b 手势手感与观感（Chrome 全屏，`web\run_web.bat`）；按反馈微调。
+2. 现场标定（3–5m 成人/儿童、双人入画）：`.venv` 装 mediapipe 后跑 `tests/camera_check --label ...`
+   （本机 venv 目前只有 pygame-ce/opencv/numpy，未装 mediapipe），据数据收窄
+   lockMaxJump/swipeHi/lockRoi（docs/03 H4/H8）。
+3. CPU-only 笔记本实测帧率（`?debug=1` 看 FPS 与 Q 档位），确认自适应降级链路。
+4. 验收后 commit + push GitHub；展厅 kiosk 部署实物（docs/03 H3：任务计划/看门狗/电源策略）。
+5. 72h 烤机（tests/soak）与 docs/03 验收基线（≥55fps、误触≤1次/5min、双人 0 误夺控）。
 
 ---
 
 ## 5. 踩过的坑（绝对不要再踩）
 
-1. **本机环境**：Windows 11。旧机（26566）系统 Python 3.14.6；**2026-09-05 起项目在 Administrator 新机**，PATH 默认 python=Anaconda 3.11（有坑 14，不可用），Python 测试统一走项目根 `.venv`（uv CPython 3.14.3 + pygame-ce 2.5.8 + opencv-python 5.0.0.93 + numpy）；本机无 mediapipe（`import mediapipe` 走 `_MP_OK=False` 静默降级，别尝试装）；node v24.20；**浏览器：26566 旧机有用户安装的 Chrome（`C:\Users\26566\AppData\Local\Google\Chrome\Application\chrome.exe`，2026-09-07 用户确认并要求优先使用），Edge 兜底**；Administrator 新机只有 Edge（`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`）。无头测试用 dummy SDL 驱动即可。
+1. **本机环境（2026-09-08 核实）**：Windows 11。**Administrator 新机**（26566 旧机已弃用）：PATH 默认 python=Anaconda 3.11（有坑 14，不可用），Python 统一走项目根 `.venv`（uv CPython 3.14.3 + pygame-ce 2.5.8 + opencv-python 5.0.0.93 + numpy 2.5.3，自包含）；Python 版 mediapipe 未装（`import mediapipe` 走 `_MP_OK=False` 静默降级，现场标定时装进 .venv，别装进 Anaconda）；node v22.23.2；**摄像头：Logi C270 HD WebCam（可用，旧记录"无摄像头"作废）**；**浏览器：用户两次确认（2026-09-07/09-08）一律优先 Chrome，Edge 兜底**。Chrome 在 `C:\Program Files\Google\Chrome\Application\chrome.exe`（此前记录『新机只有 Edge』已过时，曾导致误用 Edge 启动）。run_web.bat 探测链 Chrome(x64/x86/用户) → Edge → 系统默认。无头测试用 dummy SDL 驱动即可。
 2. **`tests/camera_check.py` 已重写（H1 已修，2026-09-04）**：旧版引用不存在的 `tr.speed/tr.swipe` 见手即崩、二次开相机、空转假通过，全部修掉；现在是现场标定工具（检测率/掌宽像素/手速/掌心 y/丢失段/齐发数，CSV 输出，退出码 0/1/2），另有 `--selftest` 合成自检（本机可跑）。真机标定用法见 README 验证段与 docs/03 P0。注意：它仍需 Python 3.12 venv + mediapipe + 摄像头，本机 3.14 只能跑 `--selftest`。
 3. **smoke.py 的时间是墙钟不是虚拟时钟**：`t = time.time()-t0`，截图时刻会抖动；但断言基于 update 计数、确定性可复现。写新无头测试请像 `lock_check.py` 一样用固定步长 `i/60` 驱动。
 4. **Edge 无头截图的正确姿势**（Chrome 同理）：
@@ -307,3 +327,73 @@ three 的 compose 最后才读 position（te[12..14]），scale 先覆写 `_v2` 
 5. **H3+H6**：deploy/ 实物（kiosk 启动器/注册表免弹窗/任务计划/三层看门狗/电源策略/--bind 127.0.0.1）；AudioContext 启动即创建+resume；预览窗与调试键收敛。
 6. **H5**：目标机实测帧率/显存，设备像素封顶、MSAA samples=0 A/B、全屏 pass RT 关 depthBuffer。
 7. P1：M-AGE 停留 bug、16.3° 斜挥分裂（齐发宽高比换算）、冷却补发/位移闸门、死配置接线、引导 UI（docs/03 第四/五节有完整清单与 file:line）。
+
+---
+
+## 9. v6 前端优化（2026-09-08，深度借鉴 WoyouWoyou/sword-control）
+
+GitHub 仓库 evanmaranzano/yujian-sword-array（v5 快照）clone 到 `Desktop\yujian-v6-work` 做（本机 v4 旧副本在 `Desktop\yujian44.5new\隔空御剑`，仅供取 GLB/venv，勿再开发）。用户目标：光剑更丝滑、CPU-only 笔记本可用、手势识别更稳、**修剑指严重过曝+巨粗光柱**。
+
+### 9.1 修复的 bug（按严重度）
+
+1. **剑指过曝+巨粗光柱（用户报告）**：volley.js `FORM_POSE.BIG_SWORD` 把 300 把加色混合的剑叠在同一点（scale 6.5、bright 1.0），加色叠加 HDR 爆表 + bloom 阈值 0.18 几乎全屏泛光 → 纯白粗柱。**改法=sword-control 原方案**：volley 新增独立单把大剑网格（`buildEnergySword` 内组预转 -π/2 立正 + 外组跟手/侧倾/缩放，`_updateBigSword`），阵型切 BIG_SWORD 时万剑缩没（pose scale→0）、本命剑退场（director `heroHere`），切换双向淡入淡出。`bigSwordScale` 6.5→5.5。
+2. **demo/无头模式全坏（v5 起就坏，旧截图一直带 ENGINE FAILED 遮罩）**：HandTracker 构造函数漏 `this.demo = demo` 赋值 → demo 永远走真相机路径 → 无头下 import 失败报 ENGINE FAILED。
+3. **`python -m http.server` 启动时 MediaPipe 必挂**：Python<3.13 的 mimetypes 把 .mjs 服成 text/plain，浏览器严格 MIME 拒载 ES 模块 → 真机主线 ENGINE FAILED。**修复=tools/serve.py**（.mjs/.wasm/.task 正确 MIME），run_web.bat 已切。**展厅部署必须用 serve.py 或其它认 .mjs 的服务器**。
+4. `environment.js` 引用不存在的 `FX.stars.color`（靠默认白色侥幸工作）→ 改 `FX.ink.starfield`。
+5. 实例色蓝通道 1.18>1（加色推高 HDR）→ 钳到 ≤1；bloom 阈值 0.18→0.45、强度 0.75→0.6（叠层不再泛白，辉光壳还在）。
+
+### 9.2 丝滑与性能（CPU-only 笔记本）
+
+- **手势朝向平滑**：volley 实例新增 sdx/sdy/sdz 朝向向量逐帧指数平滑（原逐帧硬切，阵型旋转抖动）；`?probe=1` 可 dump 阵型状态。
+- **手位 One-Euro 滤波**（tracking.js `OneEuro2D`，Casiez 2012）：慢速强滤波杀 landmark 抖动、快速自动放宽带宽；只作用于显示路径（published nx/ny），挥舞检测仍吃原始已接受帧，速度不失真。CFG.smoothAlpha（lock 内）未动，符合两版同值约定。
+- **自适应画质**（main.js `AdaptiveQuality`）：采样 500ms FPS，<45 持续 2s 降渲染分辨率（1.0→0.55 步进 0.12），到底仍低则关 bloom pass + `director.applyLowGlow` 加厚光晕壳补偿（FX.energySwordLow）；>57 持续 8s 逐级恢复。`?q=high/low` 强制。相机请求 1280×720→640×480（MediaPipe 内部会缩到模型分辨率，高请求白烧采集，sword-control 实证）。debug HUD 显示 Q 档位（#quality）。
+
+### 9.3 手势识别重写（gesture.js，方向不变）
+
+原判定用 y 轴上下比较（要求手正立）——**剑指横指向屏幕瞄准时误判回 IDLE，阵型闪跳**。重写为：伸/弯=指尖-腕/中关节-腕距离比（伸 >1.16，弯 <0.97，任意朝向成立）；拇指=2-3-4 关节点角 + 掌宽归一外张距；掌向/拇指向=方向向量比。判定优先级与双手手势不变。web/test/gesture.test.mjs 新增 5 组图像平面旋转用例（旋转 45°~90° 后分类必须不变），**17/17 过**。稳定计时 gestureStableMs=500 未动。
+
+### 9.4 验证
+
+`bash tools/verify_v6.sh`（YUJIAN_PY 指向可用 venv）：node 29/29、lock_check 19、smoke。无头截图 `?demo=1&t=8.0&gesture=<名>`（**t=8 是关键**：demo 脚本在 t≈1.5-2.6 触发两次齐发，264 剑约 t7 才归阵+拖尾淡出完，早冻会拍到半空阵/楔形拖尾残影，非 bug）。六阵型+低画质档已逐张目检：大剑=单把青色能量剑无过曝、剑柱/六芒星/双龙/剑球/待机全正常。Python 版未改，回归绿。
+
+### 9.5 遗留 / 下一步
+
+- 真机（笔记本 iGPU / CPU-only）实测帧率未做——自适应画质即为此设计，现场看 #quality 档位即可判断瓶颈。
+- 领头剑 ribbon 剑气在齐发归阵交叉瞬间偶发扫过手锚点（视觉暂态，live 下自然）；如嫌乱可减 trailLeads。
+- v5 的 `web/shots/*.png` 是旧版产物未更新；deploy/kiosk 实物（docs/03 H3）仍未做。
+- 改动未 commit（在 yujian-v6-work 工作区），用户验收后再推 GitHub。
+
+### 9.6 v6b：按用户反馈完全复刻 sword-control（2026-09-08 第二轮）
+
+用户真机验收 v6 后反馈：手势识别"完全有问题"、剑指时仍有剑球阵、不喜欢默认球型阵。第二轮把
+表现层与手势判定改为**逐项复刻 WoyouWoyou/sword-control**（可优化不能更差）：
+
+- **gesture.js**：判定器逐行移植原版（y 轴比较原样、双手优先、FIST→TWO→THUMB_UP→SHAKA→
+  ROCK→PALM_DOWN→OPEN_PALM 优先级原样）。两处保留仓库修正（原版真缺陷）：①原版 isFist
+  只要求 4 项卷曲，点赞手势永远进不了 THUMB_UP 分支 → 恢复"拇指必须也弯曲"；②原版
+  isPalmDown 的 y 轴伸直判定对手指朝下恒为假 → 恢复距离比判定。numHands 1→2（双手手势
+  此前从未可能触发），锁定手优选（双手时取离上一接受位置最近者排第一，保会话锁连续性），
+  landmark 统一先镜像再判（位置/手势/方向同坐标系）。gestureStableMs 500→250（原版即时
+  切换，250ms 折中滤单帧误检）。tracking 新增输出：指向方向（腕→中指尖，原版取反语义）、
+  掌法向（食指根×小指根）、双手中心/间距（中指根中点）。旋转不变性测试用例已删（与原版
+  y 轴判定不兼容），测试恢复 v5 用例 12/12。
+- **volley.js 重写**：阵型数学逐项移植原版 update*State——剑球/剑柱/六芒星/双龙/8字环/
+  太极/聚能球全部**固定中心**（原版如此；v6 跟手锚点是"动画有问题"的观感来源之一）；
+  瀑布(OPEN_PALM)/剑雨(PALM_DOWN)/爆裂(HANDS_PUSH)为速度积分型（含重力、出界回收、
+  跟手漂移，per-frame 语义统一换算 per-second）；六芒星能量连线（6 外框+3 内叉 Line）；
+  双龙 B 链紫、太极阳链白（实例色 colorMode，通道钳 ≤1）；待机=**漫天飞剑**（原版地面
+  散落按正视角相机改为全屏体积散布+缓浮+慢翻滚，用户点名要的效果）；聚能球半径随双手
+  距离（原版公式）；大剑朝向=手势方向混 up 向量（防指向相机时剑刃消失）。齐发 burst 保留
+  但瀑布阵型下整段屏蔽（director.onSwipe）。位形吸附 lerpK 7→5.2（≈原版 0.085/frame）。
+- **验收**：node 24/24、lock_check 19、smoke 全绿；12 阵型无头截图逐张目检通过
+  （位形阵截图用 t=11——demo 脚本两次齐发 ~t9 才全部归阵；动态阵中途冻结）。
+  真机手势手感待用户复验。
+
+### 9.7 v6c（2026-09-08 第三轮，用户真机反馈）
+
+- 不要锁定光圈；默认剑阵中心跟手（`formCX/formCY`，IDLE 有人时收成跟手云团）。
+- 剑指不要合成一把：`_packSwordCloud` 把 300 实例装进柄/护手/刃，独立大剑网格永久隐藏。
+- HUD 复刻 sword-control：左上角摄像头+未镜像骨骼（画布 CSS `scaleX(-1)` 与视频同向）、底部手势名、左下角 11 条小字表。
+- 双手捧起：交叉改为腕/指尖 x 次序相反；捧起=两手张开+指尖内扣+间距 0.08–0.55。聚能球中心改为双手上方 1.4。
+- 双拳阵型改为八卦八门径向剑臂（青/紫阴阳门），不再用太极双鱼。
+- 启动残留：8000 端口若被旧 `serve.py` 占用，先杀再 `run_web.bat`。

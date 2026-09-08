@@ -47,7 +47,7 @@ export class Environment {
     geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
     const mat = new THREE.PointsMaterial({
-      color: FX.stars.color,
+      color: FX.ink.starfield,   // v6 修复：原引用 FX.stars.color 未定义（靠默认白色侥幸工作）
       size: FX.stars.size,
       map: softDotTexture(),
       transparent: true,

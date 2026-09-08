@@ -27,7 +27,9 @@ export class PostFX {
     this.selection = this.bloom.selection;
 
     // SelectiveBloom 带 DEPTH 属性，单独一个 pass 避免与其它效果合并冲突
-    this.composer.addPass(new EffectPass(camera, this.bloom));
+    this.bloomPass = new EffectPass(camera, this.bloom);
+    this.composer.addPass(this.bloomPass);
+    this.bloomEnabled = true;
 
     const vignette = new VignetteEffect({ offset: FX.vignette.offset, darkness: FX.vignette.darkness });
     const noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY });
@@ -44,6 +46,13 @@ export class PostFX {
   }
 
   add(...objs) { for (const o of objs) if (o) this.selection.add(o); }
+
+  // 低画质开关：关掉辉光 pass（自适应画质兜底用；光晕壳不透明度补偿由 director.applyLowGlow 做）
+  setBloomEnabled(on) {
+    this.bloomPass.enabled = !!on;
+    this.bloomEnabled = !!on;
+  }
+
   render(dt) { this.composer.render(dt); }
   setSize(w, h) { this.composer.setSize(w, h); }
 }
