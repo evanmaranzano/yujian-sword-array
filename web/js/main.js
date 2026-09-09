@@ -23,17 +23,17 @@ if (qs.has('kiosk')) document.body.classList.add('kiosk');
 
 const GESTURE_NAMES = {
   IDLE: '等待检测手势...',
-  FIST: '握拳 - 万剑聚拢',
-  TWO_FINGERS: '剑指 - 万剑成剑',
-  OPEN_PALM: '出掌 - 万剑齐发',
+  FIST: '握拳 - 剑盾护体',
+  TWO_FINGERS: '剑指 - 游龙随行',
+  OPEN_PALM: '出掌 - 剑莲现世',
   THUMB_UP: '点赞 - 冲天剑柱',
   SHAKA: '六字诀 - 六芒星阵',
-  ROCK: 'Rock（食指+小指）- 双龙交织',
+  ROCK: '金属礼 - 大庚剑阵',
   PALM_DOWN: '下压 - 剑雨倾盆',
   CROSSED_HANDS: '双手交叉 - 8字环',
   HANDS_PUSH: '双手推开 - 爆裂波',
   HANDS_CUP: '双手捧起 - 聚能球',
-  DOUBLE_FIST: '双拳 - 八卦阵',
+  DOUBLE_FIST: '双拳 - 大庚剑阵（八卦合一）',
 };
 const HAND_CONN = [
   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -59,8 +59,8 @@ renderer.setClearColor(0x04060d);
 $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 240);
-camera.position.set(0, 0, 14);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+camera.position.set(0, 3, 40);
 
 let director, postfx, tracker, quality;
 
@@ -214,7 +214,10 @@ async function boot() {
     director = new Director(scene, camera);
     postfx = new PostFX(renderer, scene, camera);
     postfx.add(...director.bloomTargets());
-    if (forceGesture) director.onGesture(forceGesture);
+    if (forceGesture) {
+      director.forceGesture = forceGesture;
+      director.onGesture(forceGesture);
+    }
     quality = new AdaptiveQuality(renderer, postfx, director);
 
     tracker = new HandTracker({

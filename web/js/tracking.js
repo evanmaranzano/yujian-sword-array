@@ -206,6 +206,7 @@ export class HandTracker {
       this.status = 'demo';
       this.phase = 'idle';
       this.running = true;
+      this.onHealth({ state: 'ok', msg: '' });
       if (this.prerollTo > 0) return;   // 由外部用 scriptAt(t) 确定性驱动
       this._loopDemo();
       return;
@@ -291,6 +292,7 @@ export class HandTracker {
           const other = hands.find(h => h !== locked) || null;
           const ordered = other ? [locked, other] : [locked];
           this._updateGesture(now, ordered);
+          this.lockedLandmarks = locked;
           this._updateHandContext(locked, other);
           const [px, py] = palmCenter(locked);
           out = this.lock.update(now, true, px, py, palmSize(locked));
@@ -298,6 +300,7 @@ export class HandTracker {
           this.rawHands = [];
           out = this.lock.update(now, false, 0, 0, null);
           this._updateGesture(now, null);
+          this.lockedLandmarks = null;
           this.hand2Nx = null;
         }
       } catch (e) {
@@ -403,6 +406,7 @@ export class HandTracker {
       hand2: (this.present && this.hand2Nx !== null) ? { x: this.hand2Nx, y: this.hand2Ny } : null,
       handsCenter: { x: this.ncx, y: this.ncy },
       handDist: this.handDist,
+      landmarks: this.present ? this.lockedLandmarks : null,
     });
   }
 

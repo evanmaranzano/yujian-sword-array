@@ -77,7 +77,7 @@ export const FX = {
 
   // 手势识别稳定性：同一手势连续保持该时长后才切换阵型（原版即时切换；
   // 250ms 折中——近实时手感，又滤掉单帧误检）
-  gestureStableMs: 250,
+  gestureStableMs: 180,
 
   // 本命剑
   hero: {
@@ -97,7 +97,7 @@ export const FX = {
 
   // 后处理（选择性辉光：只让剑/法阵发光，山月不入 bloom）。
   // v6 再治过曝：阈值 0.18→0.45（叠层加色不再整体泛白），强度 0.75→0.6
-  bloom: { intensity: 0.6, luminanceThreshold: 0.45, luminanceSmoothing: 0.2, radius: 0.55 },
+  bloom: { intensity: 1.8, luminanceThreshold: 0.15, luminanceSmoothing: 0.4, radius: 0.6 },
   vignette: { offset: 0.35, darkness: 0.72 },
   grain: 0.04,
   exposure: 0.72,

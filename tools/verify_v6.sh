@@ -5,8 +5,18 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-EDGE="/c/Program Files/Google/Chrome/Application/chrome.exe"   # 用户要求 Chrome 优先（2026-09-08 确认）
-[ -x "$EDGE" ] || EDGE="/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+# 自动探测浏览器：优先 Chrome（覆盖 LocalAppData、ProgramFiles 等），Edge 兜底
+EDGE=""
+for p in \
+  "$LOCALAPPDATA/Google/Chrome/Application/chrome.exe" \
+  "/c/Users/${USERNAME:-26566}/AppData/Local/Google/Chrome/Application/chrome.exe" \
+  "/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  "/c/Program Files (x86)/Google/Chrome/Application/chrome.exe" \
+  "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" \
+  "/c/Program Files/Microsoft/Edge/Application/msedge.exe"; do
+  if [ -n "$p" ] && [ -f "$p" ]; then EDGE="$p"; break; fi
+done
+[ -n "$EDGE" ] || EDGE="chrome"
 SHOT_DIR="/tmp/v6shots"
 PORT=8162
 FAIL=0

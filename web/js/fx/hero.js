@@ -1,37 +1,71 @@
-// 本命剑（sword-control 星空光剑）：程序化能量光剑三层圆柱
-// （内核青 0x00ffff / 光晕蓝 0x0066ff / 外层 0x00aaff + 白剑尖光球，参数见 FX.energySword），
-// z 向纵深"剑来"、弹簧跟手、全程限速，刃尖挂青色 ribbon 剑气（0x00aaff）。
-// 修复 docs/04 N6/M-AGE：arrive 段同样限速、离开停留独立计时、释放清速。
+// 本命剑（华夏仙道神剑）：四面双刃菱形剑身、起棱带脊、云纹飞翼剑格、配重剑首
+// 内核天青 0x80f8ff / 光晕湛蓝 0x0088ff / 外层幽蓝 0x0044dd，保留青蓝仙道色系。
+// 弹簧跟手、全程限速，刃尖挂青色 ribbon 剑气（0x00aaff）。
 import * as THREE from 'three';
 import { FX } from '../fx.config.js';
 import { TrailRenderer } from './trail.js';
+import { buildChineseSwordGeometry } from './swordModel.js';
 
-// 程序化能量光剑（sword-control createSword 同构）：内核青 / 光晕蓝 / 外层青蓝 + 白剑尖，
-// 全部 MeshBasicMaterial + AdditiveBlending，配合选择性辉光自发光。
-// 几何沿 +Z 轴立起（rotation.x = π/2），剑尖在 +Z 顶端。
+// 程序化华夏仙剑：四面双刃剑体 + 双层剑气光晕壳
+// 几何体沿 +Y 轴自然立起，剑尖朝向 +Y。
 export function buildEnergySword(E = FX.energySword) {
   const g = new THREE.Group();
-  const mk = (rT, rB, color, opacity, layer) => {
-    const m = new THREE.Mesh(
-      new THREE.CylinderGeometry(rT, rB, E.bladeLength, 8, 1, true),
-      new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity,
-        blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-      }));
-    m.userData.layer = layer;   // core|mid|outer（低画质光晕补偿按层调不透明度）
-    m.rotation.x = Math.PI / 2;   // 剑刃朝前（圆柱 +Y → +Z）
-    return m;
-  };
-  g.add(mk(E.coreRadiusTop, E.coreRadiusBottom, E.coreColor, E.coreOpacity, 'core'));
-  g.add(mk(E.coreRadiusTop * E.midScale, E.coreRadiusBottom * E.midScale, E.midColor, E.midOpacity, 'mid'));
-  g.add(mk(E.coreRadiusTop * E.outerScale, E.coreRadiusBottom * E.outerScale, E.outerColor, E.outerOpacity, 'outer'));
+
+  // 1. 实体剑身核心（四面双刃、剑脊起棱、飞翼剑格、配重剑首）
+  const coreGeo = buildChineseSwordGeometry({ isAura: false, scale: 0.95 });
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: 0x80f8ff,
+    transparent: true,
+    opacity: E.coreOpacity || 0.92,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  coreMesh.userData.layer = 'core';
+  g.add(coreMesh);
+
+  // 2. 中层剑气光晕（微包裹刃身与剑格）
+  const midGeo = buildChineseSwordGeometry({ isAura: true, scale: 1.02 });
+  const midMat = new THREE.MeshBasicMaterial({
+    color: E.midColor || 0x0088ff,
+    transparent: true,
+    opacity: E.midOpacity || 0.35,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  const midMesh = new THREE.Mesh(midGeo, midMat);
+  midMesh.userData.layer = 'mid';
+  g.add(midMesh);
+
+  // 3. 外层浩瀚剑气光晕
+  const outerGeo = buildChineseSwordGeometry({ isAura: true, scale: 1.18 });
+  const outerMat = new THREE.MeshBasicMaterial({
+    color: E.outerColor || 0x0044dd,
+    transparent: true,
+    opacity: E.outerOpacity || 0.18,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  const outerMesh = new THREE.Mesh(outerGeo, outerMat);
+  outerMesh.userData.layer = 'outer';
+  g.add(outerMesh);
+
+  // 4. 剑尖灵珠聚光
   const tip = new THREE.Mesh(
-    new THREE.SphereGeometry(E.tipRadius, 8, 8),
+    new THREE.SphereGeometry(0.045, 8, 8),
     new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: E.tipOpacity,
-      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-    }));
-  tip.position.z = E.bladeLength / 2;
+      color: 0xffffff,
+      transparent: true,
+      opacity: E.tipOpacity || 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    })
+  );
+  tip.position.y = 2.45 * 0.95;
   g.add(tip);
   return g;
 }
@@ -45,8 +79,9 @@ export class HeroSword {
     scene.add(this.group);
 
     // 刃尖挂点（跟随剑本体的世界矩阵）：剑长 1.2 的一半
+    // 刃尖挂点（跟随剑本体世界矩阵）：剑长约 2.33
     this.tip = new THREE.Object3D();
-    this.tip.position.set(0, 0, 0.6);
+    this.tip.position.set(0, 2.35, 0);
     this.group.add(this.tip);
     // 青色拖尾（sword-control 0x00aaff）
     const mat = TrailRenderer.createGlowMaterial(

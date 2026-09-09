@@ -1,19 +1,19 @@
 # 交接文档（HANDOFF）
 
 > 写给一个完全没有上下文的新会话。读完本文件即可继续工作。
-> 最后更新：2026-09-08（v6d：八卦真卦符重做、剑指指哪飞哪（剑云+背景万剑同向）、GitHub Pages 上线，见 9.8）
+> 最后更新：2026-09-09（v6e：融合大庚剑阵全景重构、华夏仙剑模型、自适应广角镜头、法阵光盾天雷与手势优化，见 9.9）
 
 ---
 
-## 0. 当前状态速览（2026-09-08，以本节为准，历史章节仅备查）
+## 0. 当前状态速览（2026-09-09，以本节为准，历史章节仅备查）
 
-- **是什么**：展厅实时手势御剑「隔空御剑 · 万剑归宗」Web 版（Three.js + MediaPipe，纯本地离线），Python v1 备用版仅作无头回归/标定载体。
-- **在哪**：`C:\Users\Administrator\Desktop\yujian-v6-work`（git = GitHub `evanmaranzano/yujian-sword-array`）。
-- **版本**：v6c。底座仍是 sword-control 手势/阵型 + 三件自有增强（会话锁、挥手齐发、自适应画质）。相对 v6b 的用户向改动：有人时阵型中心跟手（无锁定光圈）；剑指=300 把小剑拼剑形（互不共点）；左上角摄像头+骨骼、底部手势名、左下角手势表（`?kiosk=1` / `?demo=1` 隐藏）；双拳=八卦八门；双手捧起改为张开+指尖内扣（不再被「交叉」抢走）。无人待机仍是漫天飞剑。
-- **怎么跑**：`web\run_web.bat`（必须 `tools/serve.py`，Chrome 优先全屏）。勿用 `python -m http.server`（.mjs MIME 拒载 MediaPipe）。本机摄像头 Logi C270。
-- **怎么验**：`node --test web/test/*.mjs`（手势 13 + 锁 8 + 挥舞 4）；Python `.venv`：`lock_check` / `smoke` / `camera_check --selftest`；阵型截图 `?demo=1&t=11&gesture=<名>`。`bash tools/verify_v6.sh` 一键（含无头截图）。
-- **机器**：Win11 / Administrator；Python 一律项目根 `.venv`（勿用 Anaconda）；node v22.23.2；浏览器优先 Chrome。
-- **等什么**：现场标定（H4/H8，venv 尚未装 mediapipe）→ kiosk 部署（H3）→ 72h 烤机。
+- **是什么**：展厅实时手势御剑「隔空御剑 · 万剑归宗」Web 版（Three.js + MediaPipe，纯本地离线），融合大庚剑阵全景宏大视觉与华夏仙剑剑体。
+- **在哪**：`C:\Users\26566\Desktop\yujian-sword-array`（git = GitHub `evanmaranzano/yujian-sword-array`）。
+- **版本**：v6e。深度融合大庚剑阵全景架构：500把万剑阵、华夏四面双刃仙剑模型、自适应广角摄像机（CameraController）、法阵符文盘（MagicCircle）、光盾（ShieldOrb）、天雷光环（DivineLightning）、星空与灵气微粒环境；手势识别精确调优（点赞防误触、双手交叉反序判定、下压快速响应）；全量测试与回归全绿。
+- **怎么跑**：`web\run_web.bat`（优先 Chrome 全屏，自动探测多路径，Edge 兜底）。
+- **怎么验**：`node --test web/test/*.mjs`（25/25 单测全部通过）；`bash tools/verify_v6.sh` 一键全量验证（含语法检查、Python 回归与 13 张全阵型无头截图）。
+- **机器**：Win11 / 26566（i7-10510U + RX 640）；node v22.23.2；浏览器优先 Chrome。
+- **等什么**：现场真机体验与部署。
 
 ---
 
@@ -415,3 +415,25 @@ GitHub 仓库 evanmaranzano/yujian-sword-array（v5 快照）clone 到 `Desktop\
   web/，d33eac0；Pages MIME 已验证 .mjs/.wasm/.task 全对）。有网场合任意设备 Chrome 直接玩。
 - 验收截图：web/shots/v6d_bagua.png（八卦）、v6d_bigsword_launch.png（剑云向左发射）。
   node 25/25。改动 6bd3e8d 已推送。
+
+### 9.9 v6e（2026-09-09 融合大庚剑阵全景重构）
+
+- **融合大庚剑阵全景视觉架构**：
+  - **华夏仙剑模型 (`swordModel.js`)**：取代简陋圆柱光剑，采用四面双刃菱形剑身、起棱带脊、云纹飞翼剑格与配重剑首，配合天青核心与双层剑气光晕壳，浓郁国风仙韵。
+  - **大庚原版法阵与特效组件**：移植原版法阵符文盘 (`magicCircle.js`，DAGENG 阵型通天符文盘)、光盾护体 (`shieldOrb.js`，SHIELD 阵型双层微粒能量盾)、天雷光环 (`divineLightning.js`，闪电能量环击)。
+  - **自适应广角摄像机 (`CameraController`)**：在 `director.js` 中完整复现大庚原版自适应镜头数学（动态缩放 22~55/75，剑群包围盒自适应，手部注视点 0.7 衰减平滑跟随），极大拓展视野空间感与气势。
+  - **星空与灵气微粒环境 (`environment.js`)**：深邃夜空背景 + 2000 颗球面天辰 + 200 颗浮动上升的天青灵气光点，构建苍茫修仙意境。
+  - **剑群扩充与阵型编排 (`volley.js`)**：实例剑扩展至 500 把，全量支持游龙随行、剑莲现世、大庚剑阵、剑盾护体、冲天剑柱、六芒星阵、八卦合一等多重阵型。
+  - **SelectiveBloom 辉光调优**：后处理亮度阈值与强度精确调整（intensity 1.8, threshold 0.15），仙剑与符文盘光华璀璨而不刺眼失真。
+- **手势识别与交互痛点调优 (`gesture.js`)**：
+  - 点赞 (THUMB_UP) 优先于剑指裁决，杜绝竖起大拇指时被误抢为剑指。
+  - 剑指 (TWO_FINGERS) 确保食中二指伸展、环小指卷曲、拇指绝不翘起。
+  - 双手交叉 (CROSSED_HANDS) 判定双手腕/指掌反序交叉，搭腕与小臂交叠顺畅识别，不与双手捧起抢判定。
+  - 下压 (PALM_DOWN) 放宽严格仰角，平掌下沉即可快速触发剑雨。
+  - 双拳 (DOUBLE_FIST) 与金属礼 (ROCK) 均映射大庚剑阵。
+- **工程与启动脚本完善**：
+  - `web/run_web.bat` 与 `tools/verify_v6.sh` 升级 Chrome 自动探测链（同时覆盖 LocalAppData、ProgramFiles 等常规路径，Edge 兜底）。
+  - `tools/build_delivery.py` 增补 4 个新模块清单，重新构建单文件交付文档《隔空御剑-完整交付.md》（253KB）。
+- **全量验证**：
+  - `node --test web/test/*.mjs`：25/25 单测 100% 通过。
+  - `tools/verify_v6.sh`：JS 语法检查通过、Python `lock_check`(19) 与 `smoke` 回归通过、13 张全阵型无头截图全部正常生成，`=== ALL VERIFIED ===`。
