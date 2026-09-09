@@ -18,8 +18,20 @@ const simplex = {
     Math.sin(z * 0.7 + x * 1.3),
 };
 
+// 热循环共享临时向量（999 剑 × 60fps 下逐剑 new 会造成 GC 抖动 = "手感不够实时"）
+const _tgt = new THREE.Vector3();
+const _look = new THREE.Vector3();
+const _des = new THREE.Vector3();
+const _steer = new THREE.Vector3();
+const _sep = new THREE.Vector3();
+
+const MOBILE =
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  ) || window.innerWidth < 768;
+
 export const CONFIG = {
-  swordCount: 500,
+  swordCount: MOBILE ? 400 : 999,
   pathHistoryLength: 300,
   maxSpeed: 25,
   sprintSpeed: 50,
@@ -46,7 +58,7 @@ const FORMATION = {
   SHAKA: 'HEXAGRAM',
   ROCK: 'DAGENG',
   PALM_DOWN: 'RAIN',
-  DOUBLE_FIST: 'DAGENG',
+  DOUBLE_FIST: 'BAGUA',   // v7 恢复自研八卦卦符阵（v6d），大庚剑阵归 ROCK
   CROSSED_HANDS: 'INFINITY',
   HANDS_PUSH: 'EXPLODE',
   HANDS_CUP: 'ENERGY_BALL',
@@ -115,6 +127,7 @@ export class Volley {
       this.pathHistory.push(new THREE.Vector3(0, 0, 0));
     }
     this.lastDirection = new THREE.Vector3(0, 0, 0);
+    this._origin = new THREE.Vector3(0, 0, 0);
 
     // 5. 交互状态
     this.formation = 'LOTUS';
@@ -125,7 +138,11 @@ export class Volley {
     this.burstMode = new Uint8Array(this.swordTotal);
     this.burstAge = new Float32Array(this.swordTotal);
     this.burstLife = new Float32Array(this.swordTotal);
+    this.scl = new Float32Array(this.swordTotal).fill(1);   // 按剑尺度（八卦/大庚主剑等非均匀缩放）
     this._cursor = 0;
+
+    // 8. 双手上下文（聚能球/双手阵型用）
+    this.handsCX = 0; this.handsCY = 0; this.handsDist = 0.3;
 
     // 7. 剑气拖尾（SlashSaber）
     this.trails = [];
@@ -159,12 +176,28 @@ export class Volley {
     }
     if (f === this.formation) return;
     this.formation = f;
+    // 入场动作：爆裂波沿斐波那契球面赋予径向初速（steering 会把剑群收回手位）
+    if (f === 'EXPLODE') {
+      const N = this.swordTotal;
+      for (let i = 0; i < N; i++) {
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+        const phi = Math.acos(1 - (2 * (i + 0.5)) / N);
+        const sp = 30 + Math.random() * 18;
+        this.velocities[i].set(
+          Math.sin(phi) * Math.cos(theta) * sp,
+          Math.cos(phi) * sp,
+          Math.sin(phi) * Math.sin(theta) * sp * 0.6
+        );
+      }
+    }
   }
 
   setHands(hand, hand2, handsCenter, handsDist, dir, palmN) {
     if (hand) {
       this.handPos.set(hand.x, hand.y, hand.z || 0);
     }
+    if (handsCenter) { this.handsCX = handsCenter.x; this.handsCY = handsCenter.y; }
+    this.handsDist = handsDist || 0.3;
   }
 
   // 大庚原版历史路径延展
@@ -258,9 +291,9 @@ export class Volley {
     // 1. 无手势时自动盘旋（默认 LOTUS）
     let currentTarget = this.handPos;
     if (!this.isTracking) {
-      currentTarget = new THREE.Vector3(0, 0, 0);
+      currentTarget = this._origin;
       this.pathHistory.pop();
-      this.pathHistory.unshift(currentTarget.clone());
+      this.pathHistory.unshift(this._origin.clone());
     } else if (this.formation === 'DRAGON') {
       this.extendPath();
     }
@@ -272,7 +305,7 @@ export class Volley {
     for (let i = 0; i < this.swordTotal; i++) {
       const pos = this.positions[i];
       const vel = this.velocities[i];
-      const target = new THREE.Vector3();
+      const target = _tgt.set(0, 0, 0);
 
       // 齐发爆发飞行中的飞剑处理
       if (this.burstMode[i] === 1) {
@@ -361,6 +394,134 @@ export class Volley {
           currentTarget.y + y,
           currentTarget.z + z
         );
+      } else if (gestureMode === 'BAGUA') {
+        // ---- 八卦阵（自研 v6d 卦符阵，v7 回归）：中心阴阳环 + 8 卦×3 直爻 ----
+        const nRing = 183, perRow = 34;
+        const rot = time * 0.15;
+        const TRIG = [7, 6, 2, 4, 0, 1, 5, 3];
+        const sq = 0.94;
+        if (i < nRing) {
+          const a = (i / nRing) * Math.PI * 2 + rot * 0.6;
+          const r = 1.3;
+          target.set(
+            currentTarget.x + Math.cos(a) * r,
+            currentTarget.y + Math.sin(a) * r * sq,
+            currentTarget.z + 0.5
+          );
+          _look.set(
+            target.x - Math.sin(a),
+            target.y + Math.cos(a) * sq,
+            target.z + 0.1
+          );
+        } else {
+          const idx = i - nRing;
+          const row = idx % 24;
+          const k = Math.floor(idx / 24);
+          const gi = Math.floor(row / 3);
+          const yao = row % 3;
+          const yang = (TRIG[gi] >> yao) & 1;
+          const ga = gi * Math.PI / 4 + rot;
+          const Rg = 6.5;
+          const gx = currentTarget.x + Math.cos(ga) * Rg;
+          const gy = currentTarget.y + Math.sin(ga) * Rg * sq;
+          let tx = -Math.sin(ga), ty = Math.cos(ga) * sq;
+          const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+          let ux = Math.cos(ga), uy = Math.sin(ga) * sq;
+          const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+          const tang = (k / (perRow - 1) - 0.5) * 1.5;
+          let xoff = tang, yoff = (yao - 1) * 1.4;
+          if (!yang) {
+            const half = k < perRow / 2 ? -1 : 1;
+            const kk = k % (perRow / 2);
+            xoff = half * 1.0 + (kk / (perRow / 2 - 1) - 0.5) * 1.2;
+          }
+          const jit = Math.sin(i * 12.9898) * 0.025;
+          target.set(
+            gx + tx * (xoff + jit) + ux * yoff,
+            gy + ty * (xoff + jit) + uy * yoff,
+            currentTarget.z + 0.45 + yao * 0.02
+          );
+          _look.set(target.x + tx, target.y + ty, target.z + 0.12);
+        }
+      } else if (gestureMode === 'PILLAR') {
+        // ---- 冲天剑柱：5 层圆柱面螺旋，能量波沿柱流动 ----
+        const layers = 5;
+        const n = Math.ceil(this.swordTotal / layers);
+        const li = Math.floor(i / n);
+        const k2 = i % n;
+        const ang = (k2 / n) * Math.PI * 2 + time * 0.6;
+        const hr = li / layers;
+        const r = 3.5 + Math.sin(time * 3 + hr * Math.PI * 2) * 0.6;
+        target.set(
+          currentTarget.x + Math.cos(ang) * r,
+          currentTarget.y + hr * 18 - 6,
+          currentTarget.z + Math.sin(ang) * r
+        );
+        _look.set(target.x, target.y + 5, target.z);
+      } else if (gestureMode === 'HEXAGRAM') {
+        // ---- 六芒星：6 顶点星芒簇 ----
+        const n = Math.ceil(this.swordTotal / 6);
+        const vi = Math.floor(i / n) % 6;
+        const k3 = i % n;
+        const ang = time * 0.48 + vi * Math.PI / 3;
+        const vx = currentTarget.x + Math.cos(ang) * 8.5;
+        const vy = currentTarget.y + Math.sin(ang) * 8.5 * 0.8;
+        const vz = currentTarget.z + Math.sin(ang) * 4;
+        const sa = (k3 / n) * Math.PI * 2 + time * 1.8;
+        const sp2 = (k3 / n) * Math.PI;
+        const sr = 1.4;
+        target.set(
+          vx + Math.sin(sp2) * Math.cos(sa) * sr,
+          vy + Math.cos(sp2) * sr,
+          vz + Math.sin(sp2) * Math.sin(sa) * sr
+        );
+        _look.set(currentTarget.x, currentTarget.y, currentTarget.z);
+      } else if (gestureMode === 'RAIN') {
+        // ---- 剑雨：目标恒在下方 30 单位追坠，落底回顶 ----
+        target.set(
+          pos.x + Math.sin(i * 7.3) * 0.8,
+          pos.y - 30,
+          pos.z + Math.cos(i * 3.1) * 0.8
+        );
+        if (pos.y < -24) {
+          pos.y = 24 + Math.random() * 8;
+          pos.x = currentTarget.x + (Math.random() - 0.5) * 26;
+          pos.z = (Math.random() - 0.5) * 8;
+        }
+        _look.set(pos.x, pos.y - 5, pos.z);
+      } else if (gestureMode === 'INFINITY') {
+        // ---- 8 字环：Lissajous 轨道 ----
+        const ph = (i / this.swordTotal) * Math.PI * 2 + time * 0.6;
+        target.set(
+          currentTarget.x + 11 * Math.sin(ph),
+          currentTarget.y + 5 * Math.sin(ph * 2),
+          currentTarget.z + 3 * Math.cos(ph)
+        );
+        const p2 = ph + 0.08;
+        _look.set(
+          currentTarget.x + 11 * Math.sin(p2),
+          currentTarget.y + 5 * Math.sin(p2 * 2),
+          currentTarget.z + 3 * Math.cos(p2)
+        );
+      } else if (gestureMode === 'ENERGY_BALL') {
+        // ---- 聚能球：双手间斐波那契球面，半径随双手间距 ----
+        const R = Math.max(3, Math.min(this.handsDist * 26 + 2, 11));
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i + time * 0.9;
+        const phi = Math.acos(1 - (2 * (i + 0.5)) / this.swordTotal);
+        target.set(
+          this.handsCX + R * Math.sin(phi) * Math.cos(theta),
+          this.handsCY + 1.4 + R * Math.cos(phi),
+          currentTarget.z + R * Math.sin(phi) * Math.sin(theta) * 0.5
+        );
+        _look.set(this.handsCX, this.handsCY + 1.4, currentTarget.z);
+      } else if (gestureMode === 'EXPLODE') {
+        // ---- 爆裂波：setMode 已播种径向初速，目标=手位（steering 拉回）----
+        target.copy(currentTarget);
+        _look.set(
+          pos.x + this.velocities[i].x,
+          pos.y + this.velocities[i].y,
+          pos.z + this.velocities[i].z
+        );
       } else if (gestureMode === 'DAGENG' && this.isTracking) {
         // ---- 大庚剑阵：0号主剑巨大化6x，其余10层同心圆柱倒悬 ----
         if (i === 0) {
@@ -425,39 +586,50 @@ export class Volley {
       }
 
       // ============ 大庚原版 Boids 到达减速动力学 ============
-      let speed =
-        gestureMode === 'SHIELD' ? CONFIG.sprintSpeed : CONFIG.maxSpeed;
-      if (target.distanceTo(pos) > 4) speed = CONFIG.sprintSpeed;
-      else if (target.distanceTo(pos) < 1)
-        speed = target.distanceTo(pos) * CONFIG.maxSpeed;
+      // 自研密集图形阵（八卦/剑柱/六芒/剑雨/8字/爆裂/聚能球）用"低速 18 + 高转向力 4x +
+      // 近距 6 减速"：原版冲刺 50 + 转向上限 28/s 会对静态目标产生 ±10 级永久过冲振荡，
+      // 图形散架成横带（v7 实测）。
+      const ours =
+        gestureMode === 'BAGUA' || gestureMode === 'PILLAR' ||
+        gestureMode === 'HEXAGRAM' || gestureMode === 'RAIN' ||
+        gestureMode === 'INFINITY' || gestureMode === 'ENERGY_BALL' ||
+        gestureMode === 'EXPLODE';
+      const arriveR = ours ? 6 : 10;
+      let speed = ours
+        ? 18
+        : (gestureMode === 'SHIELD' ? CONFIG.sprintSpeed : CONFIG.maxSpeed);
+      const distT = target.distanceTo(pos);
+      if (distT > 4) speed = ours ? 18 : CONFIG.sprintSpeed;
+      else if (distT < 1) speed = distT * CONFIG.maxSpeed;
 
-      const desired = target.sub(pos);
+      const desired = _des.copy(target).sub(pos);
       const d = desired.length();
 
       if (d > 0) {
         desired.normalize();
-        if (d < 10) {
-          desired.multiplyScalar(speed * (d / 10));
+        if (d < arriveR) {
+          desired.multiplyScalar(speed * (d / arriveR));
         } else {
           desired.multiplyScalar(speed);
         }
       }
 
-      const steer = desired.sub(vel);
-      const steerFactor =
-        gestureMode === 'SHIELD' || gestureMode === 'LOTUS' ? 3 : 1;
+      const steer = _steer.copy(desired).sub(vel);
+      const steerFactor = ours
+        ? 4
+        : (gestureMode === 'SHIELD' || gestureMode === 'LOTUS' ? 3 : 1);
       steer.clampLength(0, CONFIG.steerForce * delta * steerFactor);
 
       vel.add(steer);
 
-      // 分离力
-      if (
-        i > 0 &&
-        gestureMode !== 'SHIELD' &&
-        (gestureMode !== 'LOTUS' || !this.isTracking)
-      ) {
+      // 分离力：只用于大庚四绝阵的疏阵列（DRAGON 龙身/DAGENG 柱阵/未跟手的莲花散布）。
+      // 八卦爻线、剑柱、8 字环等自研阵型是密集实线排布（剑距 <0.1），分离力会把图形推散。
+      const sepOn =
+        gestureMode === 'DRAGON' || gestureMode === 'DAGENG' ||
+        (gestureMode === 'LOTUS' && !this.isTracking);
+      if (i > 0 && sepOn) {
         const prev = this.positions[i - 1];
-        const diff = pos.clone().sub(prev);
+        const diff = _sep.copy(pos).sub(prev);
         const dDiff = diff.length();
         if (dDiff < CONFIG.separationDist && dDiff > 0.01) {
           diff.normalize().multiplyScalar(CONFIG.separationForce * delta);
@@ -465,13 +637,20 @@ export class Volley {
         }
       }
 
-      pos.add(vel.clone().multiplyScalar(delta));
+      pos.addScaledVector(vel, delta);
 
       dummy.position.copy(pos);
 
       // 朝向计算
       let lookTarget;
-      if (gestureMode === 'SHIELD' && this.isTracking) {
+      if (
+        gestureMode === 'BAGUA' || gestureMode === 'PILLAR' ||
+        gestureMode === 'HEXAGRAM' || gestureMode === 'RAIN' ||
+        gestureMode === 'INFINITY' || gestureMode === 'ENERGY_BALL' ||
+        gestureMode === 'EXPLODE'
+      ) {
+        lookTarget = _look;   // 自研阵型在目标计算分支里已写入期望朝向点
+      } else if (gestureMode === 'SHIELD' && this.isTracking) {
         if (vel.length() > 0.1) {
           lookTarget = pos.clone().add(vel.clone().normalize());
         } else {
@@ -491,21 +670,17 @@ export class Volley {
       }
       dummy.lookAt(lookTarget);
 
-      // 大庚模式剑体巨大化（平滑过渡）
+      // 按剑尺度平滑过渡（大庚主剑 6x/阵剑 1.5x；八卦环细剑）
       let targetScale = 1;
       if (gestureMode === 'DAGENG' && this.isTracking) {
-        if (i === 0) targetScale = 6;
-        else targetScale = 1.5;
+        targetScale = i === 0 ? 6 : 1.5;
+      } else if (gestureMode === 'BAGUA') {
+        targetScale = i < 183 ? 0.45 : 0.5;
       }
 
-      const currentScale = this.mesh.userData.currentScale || 1;
-      const lerpSpeed = i === 0 && gestureMode === 'DAGENG' ? 0.01 : 0.02;
-      const newScale = THREE.MathUtils.lerp(
-        currentScale,
-        targetScale,
-        lerpSpeed
-      );
-      this.mesh.userData.currentScale = newScale;
+      const lerpSpeed = i === 0 && gestureMode === 'DAGENG' ? 0.6 : 2.0;
+      this.scl[i] += (targetScale - this.scl[i]) * Math.min(1, lerpSpeed * dt);
+      const newScale = this.scl[i];
 
       dummy.scale.set(newScale, newScale, newScale);
       dummy.updateMatrix();

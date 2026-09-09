@@ -31,6 +31,37 @@ function distance3D(p1, p2) {
   );
 }
 
+// PIP 关节角：p2 处 p1-p2-p3 的夹角（度）。伸直 ≈180°，弯曲显著变小。
+// 亮光抖动下单通道判据会跳变，角度与距离比互为冗余：伸直取或、弯曲取或。
+function jointAngle(p1, p2, p3) {
+  const v1x = p1.x - p2.x, v1y = p1.y - p2.y, v1z = (p1.z || 0) - (p2.z || 0);
+  const v2x = p3.x - p2.x, v2y = p3.y - p2.y, v2z = (p3.z || 0) - (p2.z || 0);
+  const dot = v1x * v2x + v1y * v2y + v1z * v2z;
+  const m1 = Math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z) || 1e-6;
+  const m2 = Math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z) || 1e-6;
+  return (Math.acos(Math.max(-1, Math.min(1, dot / (m1 * m2))))) * 180 / Math.PI;
+}
+
+const FINGERS = [
+  { mcp: 5, pip: 6, dip: 7, tip: 8 },     // 食指
+  { mcp: 9, pip: 10, dip: 11, tip: 12 },  // 中指
+  { mcp: 13, pip: 14, dip: 15, tip: 16 }, // 无名指
+  { mcp: 17, pip: 18, dip: 19, tip: 20 }, // 小指
+];
+
+// 手指伸直：关节角 >150° 或 距离比 >1.16（任一成立即算，方向不变）
+function fingerExt(h, f) {
+  const F = FINGERS[f];
+  if (jointAngle(h[F.mcp], h[F.pip], h[F.dip]) > 150) return true;
+  return distance3D(h[F.tip], h[0]) > distance3D(h[F.pip], h[0]) * 1.16;
+}
+// 手指弯曲：关节角 <110° 或 距离比 <0.97
+function fingerCurl(h, f) {
+  const F = FINGERS[f];
+  if (jointAngle(h[F.mcp], h[F.pip], h[F.dip]) < 110) return true;
+  return distance3D(h[F.tip], h[0]) < distance3D(h[F.pip], h[0]) * 0.97;
+}
+
 // ---- 单手判定 ----
 
 function isFist(landmarks) {
@@ -63,10 +94,10 @@ function isThumbUp(landmarks) {
 }
 
 function isTwoFingers(landmarks) {
-  const indexExtended = landmarks[8].y < landmarks[7].y && landmarks[7].y < landmarks[6].y;
-  const middleExtended = landmarks[12].y < landmarks[11].y && landmarks[11].y < landmarks[10].y;
-  const ringCurled = landmarks[16].y > landmarks[14].y;
-  const pinkyCurled = landmarks[20].y > landmarks[18].y;
+  const indexExtended = fingerExt(landmarks, 0);
+  const middleExtended = fingerExt(landmarks, 1);
+  const ringCurled = fingerCurl(landmarks, 2);
+  const pinkyCurled = fingerCurl(landmarks, 3);
   return indexExtended && middleExtended && ringCurled && pinkyCurled;
 }
 
@@ -82,31 +113,26 @@ function isPalmDown(landmarks) {
 }
 
 function isOpenPalm(landmarks) {
-  const fingers = [
-    [8, 7, 6], [12, 11, 10], [16, 15, 14], [20, 19, 18],
-  ];
   let extendedCount = 0;
-  for (const [tip, mid, base] of fingers) {
-    if (landmarks[tip].y < landmarks[mid].y && landmarks[mid].y < landmarks[base].y) extendedCount++;
-  }
+  for (let f = 0; f < 4; f++) if (fingerExt(landmarks, f)) extendedCount++;
   const thumbExtended = distance3D(landmarks[4], landmarks[5]) > 0.1;
   return extendedCount >= 3 && thumbExtended;
 }
 
 function isShaka(landmarks) {
   const thumbOut = distance3D(landmarks[4], landmarks[9]) > 0.12;
-  const pinkyExtended = landmarks[20].y < landmarks[19].y && landmarks[19].y < landmarks[18].y;
-  const indexCurled = landmarks[8].y > landmarks[6].y;
-  const middleCurled = landmarks[12].y > landmarks[10].y;
-  const ringCurled = landmarks[16].y > landmarks[14].y;
+  const pinkyExtended = fingerExt(landmarks, 3);
+  const indexCurled = fingerCurl(landmarks, 0);
+  const middleCurled = fingerCurl(landmarks, 1);
+  const ringCurled = fingerCurl(landmarks, 2);
   return thumbOut && pinkyExtended && indexCurled && middleCurled && ringCurled;
 }
 
 function isRock(landmarks) {
-  const indexExtended = landmarks[8].y < landmarks[7].y && landmarks[7].y < landmarks[6].y;
-  const pinkyExtended = landmarks[20].y < landmarks[19].y && landmarks[19].y < landmarks[18].y;
-  const middleCurled = landmarks[12].y > landmarks[10].y;
-  const ringCurled = landmarks[16].y > landmarks[14].y;
+  const indexExtended = fingerExt(landmarks, 0);
+  const pinkyExtended = fingerExt(landmarks, 3);
+  const middleCurled = fingerCurl(landmarks, 1);
+  const ringCurled = fingerCurl(landmarks, 2);
   return indexExtended && pinkyExtended && middleCurled && ringCurled;
 }
 

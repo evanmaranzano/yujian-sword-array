@@ -33,7 +33,7 @@ const GESTURE_NAMES = {
   CROSSED_HANDS: '双手交叉 - 8字环',
   HANDS_PUSH: '双手推开 - 爆裂波',
   HANDS_CUP: '双手捧起 - 聚能球',
-  DOUBLE_FIST: '双拳 - 大庚剑阵（八卦合一）',
+  DOUBLE_FIST: '双拳 - 八卦阵',
 };
 const HAND_CONN = [
   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -73,7 +73,16 @@ const ui = {
   },
   setGesture(g) {
     const el = $('gesture-text');
-    if (el) el.textContent = GESTURE_NAMES[g] || g;
+    if (el) {
+      el.textContent = GESTURE_NAMES[g] || g;
+      const MODE_COLOR = {
+        TWO_FINGERS: '#00ff88', OPEN_PALM: '#ffaa44', IDLE: '#ffaa44',
+        FIST: '#88ccff', ROCK: '#7dd3fc', DOUBLE_FIST: '#c4b5fd',
+        THUMB_UP: '#67e8f9', SHAKA: '#ffd166', PALM_DOWN: '#6fa8ff',
+        CROSSED_HANDS: '#e0e0ff', HANDS_PUSH: '#ff9f6f', HANDS_CUP: '#6fc3ff',
+      };
+      el.style.color = MODE_COLOR[g] || '#00ffff';
+    }
     const guide = $('gesture-guide');
     if (guide) for (const row of guide.querySelectorAll('.g')) row.classList.toggle('on', row.dataset.k === g);
   },
@@ -228,6 +237,7 @@ async function boot() {
         ui.setPhase(s.phase);
       },
       onGesture: (g) => { director.onGesture(g); ui.setGesture(g); },
+      onBrightWarn: (b) => { const el = $('lightwarn'); if (el) el.classList.toggle('on', b); },
       onHealth: (h) => ui.health(h, tracker),
     });
     await tracker.start();
@@ -249,14 +259,17 @@ async function boot() {
       }
       if (qs.has('probe')) {
         const v = director.volley;
-        const c = v.counts;
-        let vis = 0;
-        for (let i = 0; i < v.swordTotal; i++) if (v.scale[i] > 0.01) vis++;
-        console.log(`PROBE formation=${v.formation} form=${c.form} fire=${c.fire} gather=${c.gather} ret=${c.ret} vis=${vis}`);
-        for (let i = 0; i < 3; i++) {
-          console.log(`PROBE i=${i} pos=(${v.px[i].toFixed(2)},${v.py[i].toFixed(2)},${v.pz[i].toFixed(2)}) scale=${v.scale[i].toFixed(3)}`);
+        console.log(`PROBE formation=${v.formation} isTracking=${v.isTracking} present=${director.present} total=${v.swordTotal}`);
+        let sx = 0, sy = 0, minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+        for (let i = 0; i < v.swordTotal; i++) {
+          sx += v.positions[i].x; sy += v.positions[i].y;
+          minX = Math.min(minX, v.positions[i].x); maxX = Math.max(maxX, v.positions[i].x);
+          minY = Math.min(minY, v.positions[i].y); maxY = Math.max(maxY, v.positions[i].y);
         }
-        console.log(`PROBE hand=(${v.handX.toFixed(2)},${v.handY.toFixed(2)}) bigFade=${v.bigFade.toFixed(2)}`);
+        console.log(`PROBE mean=(${(sx / v.swordTotal).toFixed(2)},${(sy / v.swordTotal).toFixed(2)}) x=[${minX.toFixed(1)},${maxX.toFixed(1)}] y=[${minY.toFixed(1)},${maxY.toFixed(1)}]`);
+        for (let i = 0; i < 3; i++) {
+          console.log(`PROBE i=${i} pos=(${v.positions[i].x.toFixed(2)},${v.positions[i].y.toFixed(2)},${v.positions[i].z.toFixed(2)}) vel=(${v.velocities[i].x.toFixed(2)},${v.velocities[i].y.toFixed(2)})`);
+        }
       }
     }
 

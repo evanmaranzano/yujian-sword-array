@@ -77,7 +77,9 @@ export const FX = {
 
   // 手势识别稳定性：同一手势连续保持该时长后才切换阵型（原版即时切换；
   // 250ms 折中——近实时手感，又滤掉单帧误检）
-  gestureStableMs: 180,
+  gestureStableMs: 180,      // 手势→手势切换稳定窗
+  gestureEnterMs: 130,       // IDLE→手势：快速进入（手感跟手）
+  gestureIdleMs: 350,        // 手势→IDLE：慢释放（阵型不闪跳）
 
   // 本命剑
   hero: {

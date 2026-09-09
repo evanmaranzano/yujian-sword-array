@@ -20,6 +20,9 @@
   #quality { top: calc(3vmin + 22px); right: 3vmin; font-size: 13px; color: #6fd39a;
              text-shadow: 0 1px 6px rgba(0,0,0,.9); opacity: 0; }
   #quality.on { opacity: .85; }
+  #lightwarn { top: calc(3vmin + 42px); right: 3vmin; font-size: 12px; color: #ffb84d;
+               text-shadow: 0 1px 6px rgba(0,0,0,.9); opacity: 0; transition: opacity .4s; }
+  #lightwarn.on { opacity: .95; }
   #status.on { opacity: .85; }
   #preview { position: fixed; top: 20px; left: 20px; width: 240px; height: 180px;
              border: 2px solid rgba(0,255,255,.5); border-radius: 10px; overflow: hidden;
@@ -79,6 +82,7 @@
 
 <div id="status" class="hud"></div>
 <div id="quality" class="hud"></div>
+<div id="lightwarn" class="hud">⚠ 环境光过亮 · 手势识别会受影响，请调低灯光/曝光</div>
 <div id="preview"><canvas id="hand-canvas"></canvas></div>
 <div id="gesture-status"><span id="gesture-text">等待检测手势...</span></div>
 <div id="gesture-guide">
@@ -93,7 +97,7 @@
   <div class="g" data-k="CROSSED_HANDS"><b>双手交叉</b>　8字环</div>
   <div class="g" data-k="HANDS_PUSH"><b>双手推开</b>　爆裂波</div>
   <div class="g" data-k="HANDS_CUP"><b>双手捧起</b>　聚能球</div>
-  <div class="g" data-k="DOUBLE_FIST"><b>双拳</b>　大庚剑阵（八卦合一）</div>
+  <div class="g" data-k="DOUBLE_FIST"><b>双拳</b>　八卦阵</div>
 </div>
 
 <div id="loading" class="overlay on">

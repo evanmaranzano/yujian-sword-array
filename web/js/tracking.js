@@ -134,13 +134,30 @@ class OneEuro2D {
   }
 }
 
+// 21 点 landmark 平滑器：每点一路 One-Euro，专供手势分类路径——
+// 展厅亮光/逆光下 landmark 高频抖动是误判主因，先滤波再分类。
+// 位置控制与挥舞检测各有自己的滤波，互不影响。
+class LandmarkSmoother {
+  constructor(n = 21) {
+    this.f = Array.from({ length: n }, () => new OneEuro2D(1.6, 0.35, 1.0));
+  }
+  reset() { for (const f of this.f) f.reset(); }
+  apply(lms, t) {
+    return lms.map((p, k) => {
+      const [x, y] = this.f[k].filter(p.x, p.y, t);
+      return { x, y, z: p.z };
+    });
+  }
+}
+
 export class HandTracker {
-  constructor({ demo = false, prerollTo = 0, onSwipe, onState, onHealth, onGesture } = {}) {
+  constructor({ demo = false, prerollTo = 0, onSwipe, onState, onHealth, onGesture, onBrightWarn } = {}) {
     this.demo = demo;             // v6 修复：原漏赋值，demo/无头截图一直走真相机路径然后 ENGINE FAILED
     this.onSwipe = onSwipe || (() => {});
     this.onState = onState || (() => {});
     this.onHealth = onHealth || (() => {});
     this.onGesture = onGesture || (() => {});
+    this.onBrightWarn = onBrightWarn || (() => {});
     // 手势稳定计时：同一手势连续保持 gestureStableMs 才上报切换（防抖）
     this._gCandidate = GESTURE.IDLE;
     this._gSince = 0;
@@ -150,6 +167,9 @@ export class HandTracker {
     this.lock = new HandLock();
     this.detector = new SwipeDetector();
     this.oe = new OneEuro2D();      // 显示路径平滑（nx/ny），挥舞检测不经过它
+    this._gSm = new LandmarkSmoother();  // 手势分类专用 landmark 滤波（亮光抖动主防线）
+    this._vote = [];                // 手势滑窗多数票（窗 5）
+    this._lumaCv = null; this._lumaAt = 0; this.brightWarn = false;
     // 手势上下文（指向方向/掌法向/第二只手/双手中心，镜像坐标系）
     this.dirX = 0; this.dirY = 1; this.dirZ = 0;
     this.palmNX = 0; this.palmNY = 0; this.palmNZ = 1;
@@ -198,6 +218,7 @@ export class HandTracker {
     this.present = false;
     this.sx = this.sy = null;
     this.hand2Nx = null; this.handDist = 0.3;
+    this._gSm.reset(); this._vote.length = 0;
     this._gCandidate = GESTURE.IDLE; this._gPublished = GESTURE.IDLE;
   }
 
@@ -218,7 +239,7 @@ export class HandTracker {
       const make = (delegate) => HandLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: './vendor/mediapipe/hand_landmarker.task', delegate },
         runningMode: 'VIDEO', numHands: 2,   // 双手手势（sword-control maxNumHands 2）
-        minHandDetectionConfidence: 0.5, minHandTrackingConfidence: 0.7,
+        minHandDetectionConfidence: 0.5, minHandTrackingConfidence: 0.6,
       });
       try { this.landmarker = await make('GPU'); }
       catch (e) { console.warn('GPU delegate 失败，回退 CPU', e); this.landmarker = await make('CPU'); }
@@ -243,6 +264,17 @@ export class HandTracker {
       await this.video.play();
       this.running = true;
       this._retries = 0;
+      // 展厅亮光应对：摄像头支持手动曝光就压低补偿（多数消费级摄像头会静默忽略）
+      try {
+        const [vtrack] = this.stream.getVideoTracks();
+        const caps = vtrack.getCapabilities ? vtrack.getCapabilities() : {};
+        if (caps.exposureMode && caps.exposureMode.includes('manual')) {
+          const ec = caps.exposureCompensation || {};
+          const comp = Math.max(ec.min ?? -2, Math.min(ec.max ?? -1, -2));
+          vtrack.applyConstraints({ advanced: [{ exposureMode: 'manual', exposureCompensation: comp }] })
+            .catch(() => {});
+        }
+      } catch (e) { /* 能力不支持则忽略 */ }
       this.onHealth({ state: 'ok', msg: '' });
       const loop = () => {
         if (!this.running) return;
@@ -270,6 +302,24 @@ export class HandTracker {
       this._fpsCount++;
       if (this._fpsT === null) { this._fpsT = now; this._fpsCount = 0; }
       else if (now - this._fpsT >= 1) { this.fps = this._fpsCount / (now - this._fpsT); this._fpsCount = 0; this._fpsT = now; }
+      // 亮光监测：每 0.5s 采样 16×12 缩略图平均亮度，过曝（>225）时通知 HUD 提醒
+      if (now - this._lumaAt > 0.5) {
+        this._lumaAt = now;
+        try {
+          if (!this._lumaCv) {
+            this._lumaCv = document.createElement('canvas');
+            this._lumaCv.width = 16; this._lumaCv.height = 12;
+          }
+          const c2 = this._lumaCv.getContext('2d', { willReadFrequently: true });
+          c2.drawImage(this.video, 0, 0, 16, 12);
+          const dd = c2.getImageData(0, 0, 16, 12).data;
+          let sum = 0;
+          for (let k = 0; k < dd.length; k += 4) sum += 0.299 * dd[k] + 0.587 * dd[k + 1] + 0.114 * dd[k + 2];
+          const mean = sum / (dd.length / 4);
+          const bright = mean > 225;
+          if (bright !== this.brightWarn) { this.brightWarn = bright; this.onBrightWarn(bright, Math.round(mean)); }
+        } catch (e) { /* 视频未就绪 */ }
+      }
       let out;
       try {
         const res = this.landmarker.detectForVideo(this.video, nowMs);
@@ -347,16 +397,39 @@ export class HandTracker {
     }
   }
 
-  // 手势分类（gesture.js）→ 稳定 gestureStableMs 后上报 onGesture（阵型切换防抖）。
+  // 手势分类（gesture.js）→ 三重抗抖 → onGesture（阵型切换）：
+  // ① landmark One-Euro 滤波（亮光抖动主防线）②滑窗 5 帧多数票 ③非对称稳定计时
+  //   （出手势 130ms 快切换 = 手感跟手；回 IDLE 350ms 慢释放 = 阵型不闪跳）。
   // landmarks 为 detectForVideo 的 res.landmarks（[[21], ...]）或 null（无手）。
   _updateGesture(now, landmarks) {
-    const g = landmarks && landmarks.length
-      ? detectGesture(landmarks[0], landmarks)
-      : GESTURE.IDLE;
-    if (g !== this._gCandidate) { this._gCandidate = g; this._gSince = now; }
-    if (g !== this._gPublished && (now - this._gSince) * 1000 >= FX.gestureStableMs) {
-      this._gPublished = g;
-      this.onGesture(g);
+    let g;
+    if (landmarks && landmarks.length) {
+      const sm0 = this._gSm.apply(landmarks[0], now);      // 只滤主手（分类关键路径）
+      g = detectGesture(sm0, [sm0, ...landmarks.slice(1)]);
+    } else {
+      this._gSm.reset();
+      g = GESTURE.IDLE;
+    }
+    // 滑窗多数票：单帧误判被历史票数压掉（亮光环境第二道防线）
+    const w = this._vote;
+    w.push(g);
+    if (w.length > 5) w.shift();
+    let voted = g, best = 0;
+    for (let a = 0; a < w.length; a++) {
+      let c = 0;
+      for (let b = 0; b < w.length; b++) if (w[b] === w[a]) c++;
+      if (c > best || (c === best && a === w.length - 1)) { best = c; voted = w[a]; }
+    }
+    if (voted !== this._gCandidate) { this._gCandidate = voted; this._gSince = now; }
+    if (voted !== this._gPublished) {
+      // 非对称稳定阈值：进入阵型快（跟手手感），退回 IDLE 慢（防阵型闪跳）
+      const hold = voted === GESTURE.IDLE
+        ? FX.gestureIdleMs
+        : (this._gPublished === GESTURE.IDLE ? FX.gestureEnterMs : FX.gestureStableMs);
+      if ((now - this._gSince) * 1000 >= hold) {
+        this._gPublished = voted;
+        this.onGesture(voted);
+      }
     }
   }
 

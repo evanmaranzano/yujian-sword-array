@@ -92,10 +92,11 @@ test('ROCK: index+pinky extended, middle+ring curled', () => {
 
 test('PALM_DOWN: fingers extended, wrist above fingertips', () => {
   const h = hand();
-  // 翻转 y：腕在上方（y 小），指尖在下方（y 大）
+  // 手指朝下：每指 MCP→PIP→DIP→TIP 沿 y 单调递增（解剖正确的手指链）
   h[0].y = 0.2;
-  for (const i of [8,12,16,20]) h[i].y = 0.7;
-  for (const i of [6,10,14,18]) h[i].y = 0.6;
+  for (const [m, pp, dd, tt] of [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]]) {
+    h[m].y = 0.5; h[pp].y = 0.6; h[dd].y = 0.65; h[tt].y = 0.72;
+  }
   // 拇指也朝下（y 大），避免被 THUMB_UP 抢先
   h[2].y = 0.55; h[3].y = 0.62; h[4].y = 0.68;
   assert.equal(detectGesture(h, [h]), G.PALM_DOWN);
