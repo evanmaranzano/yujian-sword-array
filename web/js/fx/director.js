@@ -60,7 +60,10 @@ export class Director {
     this.cand = s.cand;
     this.present = s.present;
     this.nx = s.nx; this.ny = s.ny; this.speed = s.speed;
-    this.s2 = s;
+    this.vx = s.vx || 0; this.vy = s.vy || 0;
+    this.handDist = s.handDist;
+    this.palmDir = s.dir;
+    this.palmN = s.normal;
     this.lm = s.landmarks;
 
     if (prev === 'candidate' && this.phase === 'locked') {
@@ -117,9 +120,22 @@ export class Director {
 
     // 2. 手部坐标反投影计算（大庚原版精确定位：护盾/莲花跟掌心，游龙/大庚跟食指尖）
     let targetPoint;
+    let pointDir = null;
     const currentForm = this.volley.formation;
     if (this.lm && this.lm.length >= 21) {
-      if (currentForm === 'SHIELD' || currentForm === 'LOTUS') {
+      if (currentForm === 'DRAGON') {
+        // 剑指：食中两指尖中心作为靶心，指尖方向作为朝向向量
+        const tipX = (this.lm[8].x + this.lm[12].x) * 0.5;
+        const tipY = (this.lm[8].y + this.lm[12].y) * 0.5;
+        const baseX = (this.lm[5].x + this.lm[9].x) * 0.5;
+        const baseY = (this.lm[5].y + this.lm[9].y) * 0.5;
+        const [tx, ty] = this.screenToWorld(tipX, tipY);
+        const [bx, by] = this.screenToWorld(baseX, baseY);
+        const pdx = tx - bx, pdy = ty - by;
+        const pdl = Math.hypot(pdx, pdy) || 1;
+        pointDir = { x: pdx / pdl, y: pdy / pdl, z: 0 };
+        targetPoint = { x: tipX, y: tipY };
+      } else if (currentForm === 'SHIELD' || currentForm === 'LOTUS') {
         targetPoint = {
           x: (this.lm[0].x + this.lm[9].x) * 0.5,
           y: (this.lm[0].y + this.lm[9].y) * 0.5,
@@ -137,9 +153,11 @@ export class Director {
       { x: wx, y: wy, z: wz },
       null,
       null,
-      this.s2?.handDist,
-      this.s2?.dir,
-      this.s2?.normal
+      this.handDist,
+      this.palmDir,
+      this.palmN,
+      pointDir,
+      { vx: this.vx, vy: this.vy, speed: this.speed || 0 }
     );
     if (this.present && currentForm === 'DRAGON') {
       this.volley.updatePath(this.handWorldPos);

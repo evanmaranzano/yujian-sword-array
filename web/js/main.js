@@ -209,6 +209,44 @@ class AdaptiveQuality {
   }
 }
 
+// ---------------- 背景音乐（打开即播、loop 循环；展厅 kiosk 用 run_web.bat --autoplay-policy） ----------------
+class BgmManager {
+  constructor() {
+    this.audio = document.getElementById('bgm');
+    if (!this.audio) {
+      this.audio = new Audio('./audio/bgm.mp3');
+      this.audio.id = 'bgm';
+      document.body.appendChild(this.audio);
+    }
+    this.audio.loop = true;
+    this.audio.volume = 0.75;
+    this.audio.preload = 'auto';
+
+    // loop 属性为主；ended 仅作个别浏览器不触发 loop 的保底，不监听 pause（会与系统/切页暂停互抢）
+    this.audio.addEventListener('ended', () => {
+      this.audio.currentTime = 0;
+      this.play();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.play();
+    });
+
+    const unlock = () => { this.play(); };
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock, { passive: true });
+    window.addEventListener('touchstart', unlock, { passive: true });
+
+    this.play();
+  }
+
+  play() {
+    if (!this.audio || document.hidden) return;
+    if (!this.audio.paused && !this.audio.ended) return;
+    this.audio.play().catch(() => {});
+  }
+}
+let bgmManager = null;
+
 // ---------------- 启动 ----------------
 async function boot() {
   try {
@@ -235,6 +273,7 @@ async function boot() {
       onState: (s) => {
         director.onState(s);
         ui.setPhase(s.phase);
+        if (s.present && bgmManager) bgmManager.play();
       },
       onGesture: (g) => { director.onGesture(g); ui.setGesture(g); },
       onBrightWarn: (b) => { const el = $('lightwarn'); if (el) el.classList.toggle('on', b); },
@@ -273,6 +312,7 @@ async function boot() {
       }
     }
 
+    bgmManager = new BgmManager();
     ready = true;
     $('loading').classList.remove('on');
   } catch (e) {

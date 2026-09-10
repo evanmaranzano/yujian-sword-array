@@ -6,7 +6,7 @@ export const CFG = {
   velocityWindow: 0.12,       // 速度窗口（秒）
 
   // 挥舞状态机（Web 版为上升沿瞬时触发）
-  swipeHi: 0.75,              // 速度上穿 → 立即齐发
+  swipeHi: 0.75,              // 速度上穿 → 立即齐发（N-LOCK-2 抗抖动标定门限）
   swipeLo: 0.30,              // 迟滞下线
   swipeMaxDur: 0.70,          // 挥舞最长持续（秒）
   burstCooldown: 0.35,        // 两次齐发最小间隔（秒）

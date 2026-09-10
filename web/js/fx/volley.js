@@ -32,7 +32,7 @@ const MOBILE =
 
 export const CONFIG = {
   swordCount: MOBILE ? 400 : 999,
-  pathHistoryLength: 300,
+  pathHistoryLength: 600,
   maxSpeed: 25,
   sprintSpeed: 50,
   steerForce: 28,
@@ -132,8 +132,10 @@ export class Volley {
     // 5. 交互状态
     this.formation = 'LOTUS';
     this.handPos = new THREE.Vector3(0, 0, 0);
+    this.pointDir = new THREE.Vector3(1, 0, 0);
+    this.handVel = { vx: 0, vy: 0, speed: 0 };
+    this.palmN = new THREE.Vector3(0, 0, 1);
     this.isTracking = false;
-
     // 6. 齐发爆发系统（自研优势保留）
     this.burstMode = new Uint8Array(this.swordTotal);
     this.burstAge = new Float32Array(this.swordTotal);
@@ -147,7 +149,7 @@ export class Volley {
     // 7. 剑气拖尾（SlashSaber）
     this.trails = [];
     this.trailFree = [];
-    for (let k = 0; k < 12; k++) {
+    for (let k = 0; k < 20; k++) {
       const mat = TrailRenderer.createGlowMaterial(
         new THREE.Color(0.4, 0.9, 1.0),
         new THREE.Color(0.0, 0.45, 1.0)
@@ -176,9 +178,9 @@ export class Volley {
     }
     if (f === this.formation) return;
     this.formation = f;
+    const N = this.swordTotal;
     // 入场动作：爆裂波沿斐波那契球面赋予径向初速（steering 会把剑群收回手位）
     if (f === 'EXPLODE') {
-      const N = this.swordTotal;
       for (let i = 0; i < N; i++) {
         const theta = Math.PI * (1 + Math.sqrt(5)) * i;
         const phi = Math.acos(1 - (2 * (i + 0.5)) / N);
@@ -189,41 +191,66 @@ export class Volley {
           Math.sin(phi) * Math.sin(theta) * sp * 0.6
         );
       }
+    } else if (f === 'RAIN') {
+      // 下压全屏剑雨初切入：999 剑瞬间铺展全屏天际，自九天轰然直插九幽
+      for (let i = 0; i < N; i++) {
+        const x = (Math.random() - 0.5) * 76;
+        const y = 20 + Math.random() * 24;
+        const z = (Math.random() - 0.5) * 28;
+        this.positions[i].set(x, y, z);
+        const fallSp = -(48 + Math.random() * 24);
+        this.velocities[i].set((Math.random() - 0.5) * 1.5, fallSp, (Math.random() - 0.5) * 1.5);
+      }
     }
   }
 
-  setHands(hand, hand2, handsCenter, handsDist, dir, palmN) {
+  setHands(hand, hand2, handsCenter, handsDist, dir, palmN, pointDir, handVel) {
     if (hand) {
       this.handPos.set(hand.x, hand.y, hand.z || 0);
     }
     if (handsCenter) { this.handsCX = handsCenter.x; this.handsCY = handsCenter.y; }
     this.handsDist = handsDist || 0.3;
-  }
-
-  // 大庚原版历史路径延展
-  extendPath() {
-    if (this.lastDirection.length() < 0.01) return;
-    const last = this.pathHistory[0];
-    const newPoint = last.clone().add(this.lastDirection.clone().multiplyScalar(0.3));
-    this.pathHistory.pop();
-    this.pathHistory.unshift(newPoint);
-  }
-
-  // 大庚原版历史路径更新
-  updatePath(pos) {
-    const last = this.pathHistory[0];
-    const diff = pos.clone().sub(last);
-    const dist = diff.length();
-    if (dist > 0.1) {
-      this.lastDirection.copy(diff.normalize());
-      this.pathHistory.pop();
-      this.pathHistory.unshift(pos.clone());
+    if (pointDir && (Math.abs(pointDir.x) > 0.01 || Math.abs(pointDir.y) > 0.01)) {
+      this.pointDir.set(pointDir.x, pointDir.y, pointDir.z || 0);
+    } else if (dir) {
+      this.pointDir.set(dir.x, dir.y, dir.z || 0);
+    }
+    if (palmN) {
+      this.palmN.set(palmN.x, palmN.y, palmN.z || 1);
+    }
+    if (handVel) {
+      this.handVel = handVel;
     }
   }
 
-  // 疾挥齐发（本仓库自研优势：从阵中抽 120 剑疾射飞掠长空再归阵）
+  // 历史路径平滑更新：手移动时记录真实轨迹（复用 ring 槽，禁止 clone）
+  updatePath(pos) {
+    const last = this.pathHistory[0];
+    const diff = _des.copy(pos).sub(last);
+    const dist = diff.length();
+    if (dist > 0.08) {
+      this.lastDirection.copy(diff.normalize());
+      const slot = this.pathHistory.pop();
+      slot.copy(pos);
+      this.pathHistory.unshift(slot);
+    }
+  }
+
+  // 手静止时：平滑衰减，避免手停了剑阵继续盲目向前飙飞
+  extendPath() {
+    if (this.lastDirection.length() < 0.01) return;
+    const last = this.pathHistory[0];
+    this.lastDirection.multiplyScalar(0.96);
+    if (this.lastDirection.length() > 0.05) {
+      const slot = this.pathHistory.pop();
+      slot.copy(last).addScaledVector(this.lastDirection, 0.08);
+      this.pathHistory.unshift(slot);
+    }
+  }
+
+  // 疾挥齐发：自适应抽调约 40% 飞剑（999 剑抽 400 把）雷霆齐发，其余在阵飞剑受风压动量倾斜
   burst(ox, oy, dx, dy, peak) {
-    const count = Math.min(120, this.swordTotal);
+    const count = Math.min(Math.floor(this.swordTotal * 0.40), 400);
     const perpx = -dy, perpy = dx;
     for (let k = 0; k < count; k++) {
       const i = (this._cursor++) % this.swordTotal;
@@ -232,9 +259,9 @@ export class Volley {
       this.burstLife[i] = 1.6 + Math.random() * 0.8;
       const sp = 75.0 + Math.random() * 25.0;
       const u = (k / (count - 1) || 0) - 0.5;
-      this.velocities[i].set((dx + perpx * u * 0.25) * sp, (dy + perpy * u * 0.25) * sp, (Math.random() - 0.5) * 6.0);
+      this.velocities[i].set((dx + perpx * u * 0.28) * sp, (dy + perpy * u * 0.28) * sp, (Math.random() - 0.5) * 6.0);
 
-      if (k < 8 && this.trailFree.length) {
+      if (k < 16 && this.trailFree.length) {
         const tr = this.trailFree.pop();
         tr.user.idx = i;
         tr.age = 0;
@@ -242,18 +269,34 @@ export class Volley {
         tr.activate();
       }
     }
+    // 其余留在阵中的飞剑随挥舞气浪产生整体冲量偏移（极强挥剑破空风压感）
+    const pushFactor = Math.min(peak * 12.0, 22.0);
+    for (let i = 0; i < this.swordTotal; i++) {
+      if (this.burstMode[i] === 0) {
+        this.velocities[i].x += dx * pushFactor * (0.4 + Math.random() * 0.6);
+        this.velocities[i].y += dy * pushFactor * (0.4 + Math.random() * 0.6);
+      }
+    }
   }
 
   launchCloud(dx, dy) {
-    const sp = 70.0 + Math.random() * 15.0;
+    // 剑指齐发：以剑指指尖朝向(pointDir)为主(75%)、挥舞动量为辅(25%)，指哪飞哪！
+    let fx = dx, fy = dy;
+    if (this.pointDir && (Math.abs(this.pointDir.x) > 0.05 || Math.abs(this.pointDir.y) > 0.05)) {
+      fx = this.pointDir.x * 0.75 + dx * 0.25;
+      fy = this.pointDir.y * 0.75 + dy * 0.25;
+      const fl = Math.hypot(fx, fy) || 1;
+      fx /= fl; fy /= fl;
+    }
+    const sp = 75.0 + Math.random() * 15.0;
     let trails = 0;
     for (let i = 0; i < this.swordTotal; i++) {
       this.burstMode[i] = 1;
       this.burstAge[i] = 0;
       this.burstLife[i] = 1.5 + Math.random() * 0.8;
-      const w = (Math.random() - 0.5) * 0.15;
-      this.velocities[i].set((dx - dy * w) * sp, (dy + dx * w) * sp, (Math.random() - 0.5) * 6.0);
-      if (i < 8 && this.trailFree.length) {
+      const w = (Math.random() - 0.5) * 0.20;
+      this.velocities[i].set((fx - fy * w) * sp, (fy + fx * w) * sp, (Math.random() - 0.5) * 6.0);
+      if (i < 16 && this.trailFree.length) {
         const tr = this.trailFree.pop();
         tr.user.idx = i;
         tr.age = 0;
@@ -292,8 +335,9 @@ export class Volley {
     let currentTarget = this.handPos;
     if (!this.isTracking) {
       currentTarget = this._origin;
-      this.pathHistory.pop();
-      this.pathHistory.unshift(this._origin.clone());
+      const slot = this.pathHistory.pop();
+      slot.copy(this._origin);
+      this.pathHistory.unshift(slot);
     } else if (this.formation === 'DRAGON') {
       this.extendPath();
     }
@@ -315,7 +359,7 @@ export class Volley {
           this.burstMode[i] = 2; // 归阵
         }
         dummy.position.copy(pos);
-        dummy.lookAt(pos.clone().add(vel));
+        dummy.lookAt(_look.copy(pos).add(vel));
         dummy.scale.set(1.0, 1.0, 1.0);
         dummy.updateMatrix();
         this.mesh.setMatrixAt(i, dummy.matrix);
@@ -332,7 +376,7 @@ export class Volley {
           this.burstMode[i] = 0;
         }
         dummy.position.copy(pos);
-        dummy.lookAt(pos.clone().add(vel));
+        dummy.lookAt(_look.copy(pos).add(vel));
         dummy.scale.set(1.0, 1.0, 1.0);
         dummy.updateMatrix();
         this.mesh.setMatrixAt(i, dummy.matrix);
@@ -368,10 +412,7 @@ export class Volley {
         );
         target.x += Math.sin(time * 3 + i) * 0.2;
         target.y += Math.cos(time * 3 + i * 0.7) * 0.2;
-      } else if (
-        gestureMode === 'LOTUS' ||
-        (gestureMode === 'LOTUS' && !this.isTracking)
-      ) {
+      } else if (gestureMode === 'LOTUS') {
         // ---- 莲花模式：斐波那契黄金角螺旋，中心镂空 ----
         const goldenAngle = Math.PI * (3 - Math.sqrt(5));
         const maxRadius = CONFIG.lotusRadius;
@@ -384,10 +425,19 @@ export class Volley {
         const theta = i * goldenAngle + time * CONFIG.lotusRotateSpeed;
         const breathe = 1 + Math.sin(time * 2) * 0.05;
         const currentR = r * breathe;
+        // 1. 手掌三维姿态倾角：掌心翻转时剑盘在三维空间立体倾斜
+        const basePlaneX = currentR * Math.cos(theta);
+        const basePlaneY = currentR * Math.sin(theta);
+        const tiltZ = (basePlaneX * (this.palmN?.x || 0) + basePlaneY * (this.palmN?.y || 0)) * 0.5;
 
-        const x = currentR * Math.cos(theta);
-        const y = currentR * Math.sin(theta);
-        const z = Math.sin(time * 2 + i * 0.1) * 0.2;
+        // 2. 划动手势动作风动追踪：手在空中移动/划动时，剑群顺着划动速度矢量强烈拉伸成流体形变
+        const vx = this.handVel?.vx || 0, vy = this.handVel?.vy || 0;
+        const windX = vx * (0.8 + rRatio * 1.2) * 20.0;
+        const windY = vy * (0.8 + rRatio * 1.2) * 20.0;
+
+        const x = basePlaneX + windX;
+        const y = basePlaneY + windY;
+        const z = Math.sin(time * 2 + i * 0.1) * 0.25 + tiltZ;
 
         target.set(
           currentTarget.x + x,
@@ -477,18 +527,21 @@ export class Volley {
         );
         _look.set(currentTarget.x, currentTarget.y, currentTarget.z);
       } else if (gestureMode === 'RAIN') {
-        // ---- 剑雨：目标恒在下方 30 单位追坠，落底回顶 ----
+        // ---- 全屏剑雨（自研重构）：999 剑全屏天幕暴雨直插地底，循环倾泻 ----
         target.set(
-          pos.x + Math.sin(i * 7.3) * 0.8,
-          pos.y - 30,
-          pos.z + Math.cos(i * 3.1) * 0.8
+          pos.x + Math.sin(time * 3 + i) * 0.15,
+          pos.y - 45,
+          pos.z + Math.cos(time * 3 + i) * 0.15
         );
-        if (pos.y < -24) {
-          pos.y = 24 + Math.random() * 8;
-          pos.x = currentTarget.x + (Math.random() - 0.5) * 26;
-          pos.z = (Math.random() - 0.5) * 8;
+        // 落地循环回顶：坠入深渊立即从天穹（y = 26~38）全屏散开倾泻重现
+        if (pos.y < -26) {
+          pos.y = 26 + (i % 6) * 2.2 + Math.random() * 2.0;
+          const spreadX = (Math.random() - 0.5) * 76;
+          pos.x = currentTarget.x * 0.3 + spreadX * 0.7;
+          pos.z = (Math.random() - 0.5) * 28;
+          vel.set((Math.random() - 0.5) * 1.5, -(50 + Math.random() * 25), (Math.random() - 0.5) * 1.5);
         }
-        _look.set(pos.x, pos.y - 5, pos.z);
+        _look.set(pos.x, pos.y - 15, pos.z);
       } else if (gestureMode === 'INFINITY') {
         // ---- 8 字环：Lissajous 轨道 ----
         const ph = (i / this.swordTotal) * Math.PI * 2 + time * 0.6;
@@ -554,16 +607,31 @@ export class Volley {
           );
         }
       } else {
-        // ---- 游龙模式：沿历史轨迹滑动 + 3D Simplex 噪声 ----
-        if (i < 5) {
-          target.copy(currentTarget);
-          target.x += Math.sin(time * 8 + i) * 0.3;
-          target.y += Math.cos(time * 8 + i) * 0.3;
+        // ---- 游龙模式：指尖龙头锋芒先导(25把) + 龙身沿 600 点历史轨迹均匀拉开 ----
+        const nHead = 25;
+        if (i < nHead) {
+          // 龙头锋芒：在指尖前方形成锥形突刺先导阵列，剑尖精准对准剑指所指的世界方向
+          const pRatio = i / nHead;
+          const forwardDist = pRatio * 4.2 + 0.5;
+          const radialR = Math.sqrt(pRatio) * 1.6;
+          const angle = i * 2.39996 + time * 6.0;
+          const px = this.pointDir.x || 1, py = this.pointDir.y || 0;
+          const perpX = -py, perpY = px;
+          target.set(
+            currentTarget.x + px * forwardDist + perpX * Math.cos(angle) * radialR,
+            currentTarget.y + py * forwardDist + perpY * Math.cos(angle) * radialR,
+            currentTarget.z + Math.sin(angle) * radialR * 0.7
+          );
+          _look.set(target.x + px * 5.0, target.y + py * 5.0, target.z);
         } else {
-          const pathIdx = i * 0.8;
-          const idxA = Math.min(Math.floor(pathIdx), this.pathHistory.length - 1);
+          // 龙身与龙尾：自适应在整条 600 点历史路径上平滑均匀延展，彻底消除堆积
+          const bodyI = i - nHead;
+          const bodyCount = this.swordTotal - nHead;
+          const pathRatio = bodyI / (bodyCount - 1);
+          const pathIdx = pathRatio * (this.pathHistory.length - 1);
+          const idxA = Math.floor(pathIdx);
           const idxB = Math.min(idxA + 1, this.pathHistory.length - 1);
-          const alpha = pathIdx - Math.floor(pathIdx);
+          const alpha = pathIdx - idxA;
 
           if (this.pathHistory[idxA] && this.pathHistory[idxB]) {
             target.lerpVectors(this.pathHistory[idxA], this.pathHistory[idxB], alpha);
@@ -573,12 +641,16 @@ export class Volley {
             target.copy(currentTarget);
           }
 
-          target.x += Math.sin(time * 10 + i * 0.5) * 0.2;
-          target.y += Math.cos(time * 10 + i * 0.5) * 0.2;
+          // 龙身双螺旋立体翻腾
+          const spiralAngle = bodyI * 0.14 + time * 4.5;
+          const spiralR = 1.0 + Math.sin(bodyI * 0.04 + time * 2.0) * 0.5;
+          target.x += Math.cos(spiralAngle) * spiralR * 0.6;
+          target.y += Math.sin(spiralAngle) * spiralR * 0.6;
+          target.z += Math.sin(time * 3 + bodyI * 0.08) * 0.4;
 
           const ns = CONFIG.noiseScale;
           const na =
-            CONFIG.noiseStrength * (0.8 + Math.sin(time * 2 + i * 0.05) * 0.4);
+            CONFIG.noiseStrength * (0.6 + Math.sin(time * 2 + bodyI * 0.02) * 0.3);
           target.x += simplex.noise3D(pos.x * ns, pos.y * ns, time) * na;
           target.y += simplex.noise3D(pos.y * ns, pos.z * ns, time + 100) * na;
           target.z += simplex.noise3D(pos.z * ns, pos.x * ns, time + 200) * na;
@@ -591,16 +663,37 @@ export class Volley {
       // 图形散架成横带（v7 实测）。
       const ours =
         gestureMode === 'BAGUA' || gestureMode === 'PILLAR' ||
-        gestureMode === 'HEXAGRAM' || gestureMode === 'RAIN' ||
+        gestureMode === 'HEXAGRAM' ||
         gestureMode === 'INFINITY' || gestureMode === 'ENERGY_BALL' ||
         gestureMode === 'EXPLODE';
       const arriveR = ours ? 6 : 10;
       let speed = ours
         ? 18
         : (gestureMode === 'SHIELD' ? CONFIG.sprintSpeed : CONFIG.maxSpeed);
+      let steerFactor = ours
+        ? 4
+        : (gestureMode === 'SHIELD' || gestureMode === 'LOTUS' ? 3 : 1);
+
+      if (gestureMode === 'RAIN') {
+        speed = 58; // 剑雨疾坠高速破空
+      } else if (gestureMode === 'DRAGON') {
+        // 剑指跟随极致调优：龙头 25 把先导剑享受 5.2x 超大转向力和 50 疾速，零延迟吸附指尖
+        steerFactor = i < 25 ? 5.2 : 2.8;
+        speed = i < 25 ? CONFIG.sprintSpeed : CONFIG.maxSpeed * 1.3;
+      }
+
       const distT = target.distanceTo(pos);
-      if (distT > 4) speed = ours ? 18 : CONFIG.sprintSpeed;
-      else if (distT < 1) speed = distT * CONFIG.maxSpeed;
+      if (gestureMode !== 'RAIN') {
+        if (gestureMode === 'DRAGON' && i < 25) {
+          // 龙头紧咬指尖，到达半径收窄为 2.5，杜绝超调
+          if (distT > 1.5) speed = CONFIG.sprintSpeed;
+          else speed = distT * CONFIG.sprintSpeed * 0.6;
+        } else if (distT > 4) {
+          speed = ours ? 18 : CONFIG.sprintSpeed;
+        } else if (distT < 1) {
+          speed = distT * CONFIG.maxSpeed;
+        }
+      }
 
       const desired = _des.copy(target).sub(pos);
       const d = desired.length();
@@ -615,12 +708,7 @@ export class Volley {
       }
 
       const steer = _steer.copy(desired).sub(vel);
-      const steerFactor = ours
-        ? 4
-        : (gestureMode === 'SHIELD' || gestureMode === 'LOTUS' ? 3 : 1);
       steer.clampLength(0, CONFIG.steerForce * delta * steerFactor);
-
-      vel.add(steer);
 
       // 分离力：只用于大庚四绝阵的疏阵列（DRAGON 龙身/DAGENG 柱阵/未跟手的莲花散布）。
       // 八卦爻线、剑柱、8 字环等自研阵型是密集实线排布（剑距 <0.1），分离力会把图形推散。
@@ -641,32 +729,44 @@ export class Volley {
 
       dummy.position.copy(pos);
 
-      // 朝向计算
-      let lookTarget;
+      // 朝向计算（全部走模块级 _look/_des/_sep，禁止逐剑 clone）
+      let lookTarget = _look;
       if (
         gestureMode === 'BAGUA' || gestureMode === 'PILLAR' ||
         gestureMode === 'HEXAGRAM' || gestureMode === 'RAIN' ||
         gestureMode === 'INFINITY' || gestureMode === 'ENERGY_BALL' ||
-        gestureMode === 'EXPLODE'
+        gestureMode === 'EXPLODE' ||
+        (gestureMode === 'DRAGON' && i < 25)
       ) {
-        lookTarget = _look;   // 自研阵型在目标计算分支里已写入期望朝向点
+        // 阵型在目标计算分支里已写入 _look
       } else if (gestureMode === 'SHIELD' && this.isTracking) {
         if (vel.length() > 0.1) {
-          lookTarget = pos.clone().add(vel.clone().normalize());
+          _look.copy(pos).add(_des.copy(vel).normalize());
         } else {
-          const relPos = pos.clone().sub(currentTarget);
-          const tangent = new THREE.Vector3(-relPos.z, 0, relPos.x).normalize();
-          lookTarget = pos.clone().add(tangent);
+          _des.copy(pos).sub(currentTarget);
+          _look.set(-_des.z, 0, _des.x);
+          if (_look.lengthSq() > 1e-8) _look.normalize();
+          else _look.set(0, 0, 1);
+          _look.add(pos);
         }
       } else if (gestureMode === 'LOTUS') {
-        const outward = pos.clone().sub(currentTarget).normalize();
-        lookTarget = pos.clone().add(outward);
+        // 剑尖朝向：静止向外辐射，手移动时顺划动风向偏转
+        _des.copy(pos).sub(currentTarget);
+        if (_des.lengthSq() < 1e-8) _des.set(1, 0, 0);
+        else _des.normalize();
+        const vx = this.handVel.vx || 0, vy = this.handVel.vy || 0;
+        const vLen = Math.hypot(vx, vy);
+        if (vLen > 0.06) {
+          _sep.set(vx / vLen, vy / vLen, 0);
+          _des.lerp(_sep, Math.min(vLen * 2.2, 0.85)).normalize();
+        }
+        _look.copy(pos).add(_des);
       } else if (gestureMode === 'DAGENG' && this.isTracking) {
-        lookTarget = pos.clone().add(new THREE.Vector3(0, -1, 0));
+        _look.set(pos.x, pos.y - 1, pos.z);
+      } else if (vel.length() > 0.1) {
+        _look.copy(pos).add(vel);
       } else {
-        lookTarget = pos
-          .clone()
-          .add(vel.length() > 0.1 ? vel : new THREE.Vector3(0, 0, -1));
+        _look.set(pos.x, pos.y, pos.z - 1);
       }
       dummy.lookAt(lookTarget);
 
@@ -731,10 +831,12 @@ export class Volley {
       const vel = this.velocities[i];
       if (vel.length() > 0.5) {
         const p = this.positions[i];
-        const vNorm = vel.clone().normalize();
-        const tip = p.clone().addScaledVector(vNorm, 1.5);
-        const side = new THREE.Vector3(-vNorm.y, vNorm.x, 0).normalize().multiplyScalar(0.8);
-        tr.advanceWorld(tip, side);
+        _des.copy(vel).normalize();
+        _look.copy(p).addScaledVector(_des, 1.5);
+        _sep.set(-_des.y, _des.x, 0);
+        if (_sep.lengthSq() > 1e-8) _sep.normalize().multiplyScalar(0.8);
+        else _sep.set(0.8, 0, 0);
+        tr.advanceWorld(_look, _sep);
       }
     }
   }

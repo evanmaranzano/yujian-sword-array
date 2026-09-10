@@ -64,6 +64,24 @@ test('FIST: curled fingers', () => {
 test('TWO_FINGERS: index+middle extended, ring+pinky curled', () => {
   assert.equal(detectGesture(twoFingersHand(), [twoFingersHand()]), G.TWO_FINGERS);
 });
+test('TWO_FINGERS: horizontal/tilted sword finger must never be hijacked by THUMB_UP', () => {
+  // 水平微倾斜剑指：食指尖与中指尖 y 大于关节点（绝对 y 比较曾导致抢跑点赞）
+  const h = twoFingersHand();
+  h[8] = { x: 0.70, y: 0.44, z: 0 }; h[7] = { x: 0.62, y: 0.43, z: 0 };
+  h[6] = { x: 0.54, y: 0.42, z: 0 }; h[5] = { x: 0.46, y: 0.42, z: 0 };
+  h[12] = { x: 0.70, y: 0.49, z: 0 }; h[11] = { x: 0.62, y: 0.48, z: 0 };
+  h[10] = { x: 0.54, y: 0.47, z: 0 }; h[9] = { x: 0.46, y: 0.47, z: 0 };
+  // 拇指微翘
+  h[4] = { x: 0.38, y: 0.45, z: 0 }; h[3] = { x: 0.39, y: 0.52, z: 0 };
+  assert.equal(detectGesture(h, [h]), G.TWO_FINGERS);
+});
+
+test('TWO_FINGERS: relaxed ring finger tolerance (natural sword finger)', () => {
+  // 无名指微弯但未极致收拢（实测自然剑指常见形态）
+  const h = twoFingersHand();
+  h[16] = { x: 0.56, y: 0.46, z: 0 }; // 靠近中指关节点
+  assert.equal(detectGesture(h, [h]), G.TWO_FINGERS);
+});
 
 test('THUMB_UP: thumb extended up, others curled', () => {
   const h = hand({

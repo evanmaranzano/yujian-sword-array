@@ -1,18 +1,18 @@
 # 交接文档（HANDOFF）
 
 > 写给一个完全没有上下文的新会话。读完本文件即可继续工作。
-> 最后更新：2026-09-10（v7：999 剑、恢复八卦阵等七大自研阵型接入大庚 steering、手势识别精度包（亮光鲁棒），见 9.10）
+> 最后更新：2026-09-10（v7.1：剑指 pointDir、待机剑莲风动/掌倾、全屏剑雨、BGM、热循环去分配，见 9.11）
 
 ---
 
-## 0. 当前状态速览（2026-09-09，以本节为准，历史章节仅备查）
+## 0. 当前状态速览（2026-09-10，以本节为准，历史章节仅备查）
 
 - **是什么**：展厅实时手势御剑「隔空御剑 · 万剑归宗」Web 版（Three.js + MediaPipe，纯本地离线），融合大庚剑阵全景宏大视觉与华夏仙剑剑体。
-- **在哪**：`C:\Users\26566\Desktop\yujian-sword-array`（git = GitHub `evanmaranzano/yujian-sword-array`）。
-- **版本**：v6e。深度融合大庚剑阵全景架构：500把万剑阵、华夏四面双刃仙剑模型、自适应广角摄像机（CameraController）、法阵符文盘（MagicCircle）、光盾（ShieldOrb）、天雷光环（DivineLightning）、星空与灵气微粒环境；手势识别精确调优（点赞防误触、双手交叉反序判定、下压快速响应）；全量测试与回归全绿。
-- **怎么跑**：`web\run_web.bat`（优先 Chrome 全屏，自动探测多路径，Edge 兜底）。
-- **怎么验**：`node --test web/test/*.mjs`（25/25 单测全部通过）；`bash tools/verify_v6.sh` 一键全量验证（含语法检查、Python 回归与 13 张全阵型无头截图）。
-- **机器**：Win11 / 26566（i7-10510U + RX 640）；node v22.23.2；浏览器优先 Chrome。
+- **在哪**：`C:\Users\Administrator\Desktop\yujian-v6-work`（git = GitHub `evanmaranzano/yujian-sword-array`）。
+- **版本**：v7.1。999 剑；七大自研阵型接入大庚 steering；剑指龙头跟 `pointDir`；待机莲花跟手掌法向+划动风动；全屏剑雨；内嵌循环 BGM（`web/audio/bgm.mp3`，甲方已授权可公开分发）；热循环 lookAt/path/trail 走模块级向量，禁止逐剑 `clone()`。
+- **怎么跑**：`web\run_web.bat`（优先 Chrome 全屏 + `--autoplay-policy=no-user-gesture-required`，自动探测多路径，Edge 兜底）。
+- **怎么验**：`node --test web/test/*.mjs`（27/27）；`bash tools/verify_v6.sh`；Python `lock_check` / `smoke`。
+- **机器**：Win11 / Administrator（Ryzen 9 6900HX）；node v22；浏览器优先 Chrome。
 - **等什么**：现场真机体验与部署。
 
 ---
@@ -468,3 +468,14 @@ GitHub 仓库 evanmaranzano/yujian-sword-array（v5 快照）clone 到 `Desktop\
   测试数据修正：PALM_DOWN 合成手改为解剖正确的单向手指链（旧数据关节反向折叠，角度法会读 0°）。
 - 验证：node 25/25；八卦/大庚/光盾/莲花无头截图逐张目检（web/shots/v7_*.png）。
   commit f6a9b08 已推送（Pages 自动同步）。
+
+### 9.11 v7.1（2026-09-10 剑指跟随 / 无手势动作追踪 / BGM / 审查修复）
+
+- **剑指（DRAGON）**：`director` 用食中指尖中点作靶心、指根→指尖屏幕平面方向作 `pointDir`（z=0，相机平面 2D，不是深度三维）。龙头 25 把 `steerFactor=5.2`、冲刺 50、到达半径 2.5；龙身沿 600 点 pathHistory 均匀采样 + 双螺旋。`launchCloud` 仍是 999 全员 burst（与 `burst()` 抽 40% 不同，有意：剑指一挥万剑齐发）。
+- **待机莲花（LOTUS）**：掌心法向 `palmN` 倾折盘面；`handVel.vx/vy`（归一化屏幕坐标/秒）做流体拉伸。条件已去掉死代码 `LOTUS || (LOTUS && !isTracking)`。
+- **剑雨（RAIN）**：切入时 999 剑铺 y=20~44、宽 76；落地 y<-26 循环回顶。速度 58。
+- **手势**：`fingerExt` 增加「指尖不得比指根更靠近手腕」门槛；`isFist`/`isThumbUp` 在食/中伸直时直接否决，水平剑指不再被点赞抢跑。单测 27/27（含水平剑指、无名指半弯）。
+- **BGM**：`web/audio/bgm.mp3`（Manasha Over Slowed，用户确认已获版权、可入库公开仓）。`<audio id="bgm" loop>` + `BgmManager`：loop 为主，`ended` 保底，切回前台 `visibilitychange` 续播；**禁止**监听 `pause` 无条件 `play()`（会与浏览器/切页暂停互抢）。kiosk 靠 `run_web.bat --autoplay-policy=no-user-gesture-required`；普通浏览器靠点击/按键/检测到手唤醒。
+- **热循环去分配（审查修复）**：`update`/`lookAt`/`pathHistory`/`trails` 全部复用 `_tgt/_look/_des/_steer/_sep` 与 ring 槽 `copy`，不再 `pos.clone()` / `new THREE.Vector3`。`director` 不再把整份 tracker state 塞进误名 `this.s2`，改为 `vx/vy/handDist/palmDir/palmN`。
+- 验证：`node --test web/test/*.mjs` 27/27；截图 `web/shots/v7_{idle,rain,two_fingers}.png`。
+

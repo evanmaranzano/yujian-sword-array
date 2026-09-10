@@ -49,9 +49,10 @@ const FINGERS = [
   { mcp: 17, pip: 18, dip: 19, tip: 20 }, // 小指
 ];
 
-// 手指伸直：关节角 >150° 或 距离比 >1.16（任一成立即算，方向不变）
+// 手指伸直：指尖不能比指根靠近手腕；关节角 >150° 或 距离比 >1.16（方向不变）
 function fingerExt(h, f) {
   const F = FINGERS[f];
+  if (distance3D(h[F.tip], h[0]) < distance3D(h[F.mcp], h[0]) * 1.05) return false;
   if (jointAngle(h[F.mcp], h[F.pip], h[F.dip]) > 150) return true;
   return distance3D(h[F.tip], h[0]) > distance3D(h[F.pip], h[0]) * 1.16;
 }
@@ -65,6 +66,8 @@ function fingerCurl(h, f) {
 // ---- 单手判定 ----
 
 function isFist(landmarks) {
+  // 食指或中指若有伸展，绝非握拳（杜绝任何倾斜剑指被误判为握拳）
+  if (fingerExt(landmarks, 0) || fingerExt(landmarks, 1)) return false;
   const wrist = landmarks[0];
   const fingerTips = [8, 12, 16, 20];
   const fingerBases = [5, 9, 13, 17];
@@ -82,23 +85,31 @@ function isFist(landmarks) {
 }
 
 function isThumbUp(landmarks) {
+  // 食指或中指若有伸展，绝非点赞（杜绝剑指水平/微倾时被抢跑）
+  if (fingerExt(landmarks, 0) || fingerExt(landmarks, 1)) return false;
   // 大拇指伸直向上
   const thumbExtended = (landmarks[4].y < landmarks[3].y && landmarks[3].y < landmarks[2].y) ||
     (distance3D(landmarks[4], landmarks[0]) > distance3D(landmarks[2], landmarks[0]) * 1.15 && landmarks[4].y < landmarks[2].y);
-  // 其它四指必须收拢弯曲
-  const indexCurled = landmarks[8].y > landmarks[6].y || distance3D(landmarks[8], landmarks[0]) < distance3D(landmarks[5], landmarks[0]) * 1.35;
-  const middleCurled = landmarks[12].y > landmarks[10].y || distance3D(landmarks[12], landmarks[0]) < distance3D(landmarks[9], landmarks[0]) * 1.35;
-  const ringCurled = landmarks[16].y > landmarks[14].y || distance3D(landmarks[16], landmarks[0]) < distance3D(landmarks[13], landmarks[0]) * 1.35;
-  const pinkyCurled = landmarks[20].y > landmarks[18].y || distance3D(landmarks[20], landmarks[0]) < distance3D(landmarks[17], landmarks[0]) * 1.35;
+  // 其它四指必须真正弯曲收拢（结合角度与距离，不依赖易受手位影响的单向 y 轴判断）
+  const indexCurled = fingerCurl(landmarks, 0) || distance3D(landmarks[8], landmarks[0]) < distance3D(landmarks[5], landmarks[0]) * 1.30;
+  const middleCurled = fingerCurl(landmarks, 1) || distance3D(landmarks[12], landmarks[0]) < distance3D(landmarks[9], landmarks[0]) * 1.30;
+  const ringCurled = fingerCurl(landmarks, 2) || distance3D(landmarks[16], landmarks[0]) < distance3D(landmarks[13], landmarks[0]) * 1.30;
+  const pinkyCurled = fingerCurl(landmarks, 3) || distance3D(landmarks[20], landmarks[0]) < distance3D(landmarks[17], landmarks[0]) * 1.30;
   return thumbExtended && indexCurled && middleCurled && ringCurled && pinkyCurled;
 }
 
 function isTwoFingers(landmarks) {
   const indexExtended = fingerExt(landmarks, 0);
   const middleExtended = fingerExt(landmarks, 1);
-  const ringCurled = fingerCurl(landmarks, 2);
-  const pinkyCurled = fingerCurl(landmarks, 3);
-  return indexExtended && middleExtended && ringCurled && pinkyCurled;
+  if (!indexExtended || !middleExtended) return false;
+
+  // 小指必须弯曲收拢
+  const pinkyCurled = fingerCurl(landmarks, 3) || distance3D(landmarks[20], landmarks[0]) < distance3D(landmarks[18], landmarks[0]) * 0.98;
+  if (!pinkyCurled) return false;
+
+  // 无名指放宽容差：满足 fingerCurl，或指尖距离收紧（包容自然半弯状态）
+  const ringCurled = fingerCurl(landmarks, 2) || distance3D(landmarks[16], landmarks[0]) < distance3D(landmarks[14], landmarks[0]) * 1.05;
+  return ringCurled;
 }
 
 function isPalmDown(landmarks) {
