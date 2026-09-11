@@ -20,7 +20,8 @@ const G = {
   CROSSED_HANDS: 'CROSSED_HANDS', // 交叉 → 8字环
   HANDS_PUSH: 'HANDS_PUSH',       // 推开 → 爆裂波
   HANDS_CUP: 'HANDS_CUP',         // 捧起 → 聚能球
-  DOUBLE_FIST: 'DOUBLE_FIST',     // 双拳 → 大庚剑阵（八卦合一）
+  DOUBLE_FIST: 'DOUBLE_FIST',     // 双拳 → 八卦阵
+  THREE_FINGERS: 'THREE_FINGERS', // 三指（隐藏）→ Molispark 字阵
 };
 
 function distance3D(p1, p2) {
@@ -49,12 +50,13 @@ const FINGERS = [
   { mcp: 17, pip: 18, dip: 19, tip: 20 }, // 小指
 ];
 
-// 手指伸直：指尖不能比指根靠近手腕；关节角 >150° 或 距离比 >1.16（方向不变）
+// 手指伸直：指尖不能比指根靠近手腕；关节角 >148° 或 距离比 >1.13（方向不变）
+//（前指姿态 z 深度噪声大，门限 09-11 放宽：1.05→1.02 / 150→148 / 1.16→1.13）
 function fingerExt(h, f) {
   const F = FINGERS[f];
-  if (distance3D(h[F.tip], h[0]) < distance3D(h[F.mcp], h[0]) * 1.05) return false;
-  if (jointAngle(h[F.mcp], h[F.pip], h[F.dip]) > 150) return true;
-  return distance3D(h[F.tip], h[0]) > distance3D(h[F.pip], h[0]) * 1.16;
+  if (distance3D(h[F.tip], h[0]) < distance3D(h[F.mcp], h[0]) * 1.02) return false;
+  if (jointAngle(h[F.mcp], h[F.pip], h[F.dip]) > 148) return true;
+  return distance3D(h[F.tip], h[0]) > distance3D(h[F.pip], h[0]) * 1.13;
 }
 // 手指弯曲：关节角 <110° 或 距离比 <0.97
 function fingerCurl(h, f) {
@@ -103,24 +105,52 @@ function isTwoFingers(landmarks) {
   const middleExtended = fingerExt(landmarks, 1);
   if (!indexExtended || !middleExtended) return false;
 
-  // 小指必须弯曲收拢
-  const pinkyCurled = fingerCurl(landmarks, 3) || distance3D(landmarks[20], landmarks[0]) < distance3D(landmarks[18], landmarks[0]) * 0.98;
-  if (!pinkyCurled) return false;
+  // 无名指/小指收拢：严格卷曲判定，或相对中指尖明显回缩（<80%）。
+  // 相对判定与手朝向无关——前指屏幕的剑指深度噪声大，绝对距离比常失灵
+  //（2026-09-11 实测：剑指前指漏检后落进 PALM_DOWN，"一直都是剑雨倾盆"）。
+  const wrist = landmarks[0];
+  const midTipDist = distance3D(landmarks[12], wrist);
+  const pinkyTucked = fingerCurl(landmarks, 3) ||
+    distance3D(landmarks[20], wrist) < distance3D(landmarks[18], wrist) * 0.98 ||
+    distance3D(landmarks[20], wrist) < midTipDist * 0.80;
+  if (!pinkyTucked) return false;
+  const ringTucked = fingerCurl(landmarks, 2) ||
+    distance3D(landmarks[16], wrist) < distance3D(landmarks[14], wrist) * 1.05 ||
+    distance3D(landmarks[16], wrist) < midTipDist * 0.80;
+  return ringTucked;
+}
 
-  // 无名指放宽容差：满足 fingerCurl，或指尖距离收紧（包容自然半弯状态）
-  const ringCurled = fingerCurl(landmarks, 2) || distance3D(landmarks[16], landmarks[0]) < distance3D(landmarks[14], landmarks[0]) * 1.05;
-  return ringCurled;
+// 掌法向（腕→食指根 × 腕→小指根），只取分量比例：|y| 主导 = 掌面放平。
+// 与左右手/镜像无关（取绝对值），追踪链同款叉积。
+function palmFlatness(landmarks) {
+  const w = landmarks[0], ib = landmarks[5], pb = landmarks[17];
+  const v1x = ib.x - w.x, v1y = ib.y - w.y, v1z = (ib.z || 0) - (w.z || 0);
+  const v2x = pb.x - w.x, v2y = pb.y - w.y, v2z = (pb.z || 0) - (w.z || 0);
+  const nx = v1y * v2z - v1z * v2y;
+  const ny = v1z * v2x - v1x * v2z;
+  const nz = v1x * v2y - v1y * v2x;
+  const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1e-6;
+  return Math.abs(ny / l);
 }
 
 function isPalmDown(landmarks) {
+  // 下压 = 掌面放平的按压（掌心朝下/微扣）或整手倒转指尖朝下。
+  // 旧判据「指尖均 y > 食指根 y - 0.02」命中一切前伸/非竖直向上的手：
+  // 出掌莲花、前指剑指全被抢成剑雨（09-11 用户实测"别的手势识别无效"）。
   let extendedCount = 0;
   const tips = [8, 12, 16, 20], mids = [6, 10, 14, 18];
   for (let i = 0; i < 4; i++) {
     if (distance3D(landmarks[tips[i]], landmarks[0]) > distance3D(landmarks[mids[i]], landmarks[0])) extendedCount++;
   }
+  if (extendedCount < 3) return false;
+  // 食中伸展而无名/小指收拢 = 指点姿态，绝非按压（isTwoFingers 漏检时的兜底否决）
+  if (fingerExt(landmarks, 0) && fingerExt(landmarks, 1) &&
+      !fingerExt(landmarks, 2) && !fingerExt(landmarks, 3)) return false;
   const avgTipY = (landmarks[8].y + landmarks[12].y + landmarks[16].y + landmarks[20].y) / 4;
-  const palmFacingDown = landmarks[0].y < avgTipY - 0.02 || avgTipY > landmarks[5].y - 0.02;
-  return extendedCount >= 3 && palmFacingDown;
+  // 整手倒转：腕明显高过指尖（指尖朝下按压）
+  if (landmarks[0].y < avgTipY - 0.05) return true;
+  // 掌面放平：法向 y 分量主导（掌面与竖直夹角 > ~47°；竖掌出掌 z 主导不会命中）
+  return palmFlatness(landmarks) > 0.68;
 }
 
 function isOpenPalm(landmarks) {
@@ -194,7 +224,6 @@ function isHandsCup(h1, h2) {
   const inward = left[12].x > left[0].x - 0.02 && right[12].x < right[0].x + 0.02;
   return yClose && properDistance && inward;
 }
-
 function isDoubleFist(h1, h2) {
   const checkFist = (h) => {
     const wrist = h[0];
@@ -211,6 +240,15 @@ function isDoubleFist(h1, h2) {
   return checkFist(h1) && checkFist(h2);
 }
 
+// 三指：食中无名伸直、小指弯曲。单手、比合十好做。
+// 排在剑指之后、开掌/下压之前——否则 3 指伸展会被 OPEN_PALM 抢走。
+function isThreeFingers(landmarks) {
+  if (!fingerExt(landmarks, 0) || !fingerExt(landmarks, 1) || !fingerExt(landmarks, 2)) return false;
+  const pinkyCurled = fingerCurl(landmarks, 3) ||
+    distance3D(landmarks[20], landmarks[0]) < distance3D(landmarks[18], landmarks[0]) * 0.98;
+  return pinkyCurled;
+}
+
 /**
  * 手势检测入口（严格优先级：双手优先，点赞优先于剑指，下压优先于开掌）
  */
@@ -225,11 +263,12 @@ export function detectGesture(landmarks, allHands) {
   }
   if (newGesture === G.IDLE && landmarks) {
     if (isFist(landmarks)) newGesture = G.FIST;
-    else if (isThumbUp(landmarks)) newGesture = G.THUMB_UP;       // 点赞优先，绝不抢跑剑指
+    else if (isThumbUp(landmarks)) newGesture = G.THUMB_UP;
     else if (isTwoFingers(landmarks)) newGesture = G.TWO_FINGERS;
+    else if (isThreeFingers(landmarks)) newGesture = G.THREE_FINGERS;
     else if (isShaka(landmarks)) newGesture = G.SHAKA;
     else if (isRock(landmarks)) newGesture = G.ROCK;
-    else if (isPalmDown(landmarks)) newGesture = G.PALM_DOWN;     // 下压优先于向上开掌
+    else if (isPalmDown(landmarks)) newGesture = G.PALM_DOWN;
     else if (isOpenPalm(landmarks)) newGesture = G.OPEN_PALM;
   }
   return newGesture;

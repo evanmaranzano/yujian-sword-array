@@ -62,7 +62,53 @@ const FORMATION = {
   CROSSED_HANDS: 'INFINITY',
   HANDS_PUSH: 'EXPLODE',
   HANDS_CUP: 'ENERGY_BALL',
+  THREE_FINGERS: 'LETTERS',  // 隐藏：三指 → Molispark（不进 attract，左栏不展示）
 };
+
+// ---- Molispark 字阵：真字体方案（09-11 用户嫌手画笔画丑）——
+// 离屏 canvas 用 YujianKai（楷书）渲染单词，实心掩码均匀采样 N 点铺满字形。
+// 排版由字体负责，剑阵只铺点，永远可读、永远好看。首次进入时才构建（字体需已加载）。
+const LETTER_WORD = 'Molispark';
+function buildTextLayout(n) {
+  const fs = 240;                        // 采样字号（越大掩码越细）
+  const pad = fs * 0.25;
+  const probe = document.createElement('canvas').getContext('2d');
+  const fontSpec = `bold ${fs}px "YujianKai", "STKaiti", "KaiTi", "Georgia", serif`;
+  probe.font = fontSpec;
+  const tw = Math.ceil(probe.measureText(LETTER_WORD).width);
+  const w = tw + pad * 2, h = Math.ceil(fs * 1.35);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.font = fontSpec;
+  cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  cx.fillStyle = '#fff';
+  cx.fillText(LETTER_WORD, w / 2, h / 2);
+  const data = cx.getImageData(0, 0, w, h).data;
+  // 掩码像素（2px 步进，控制点云规模）
+  const pts = [];
+  for (let y = 0; y < h; y += 2) {
+    for (let x = 0; x < w; x += 2) {
+      if (data[(y * w + x) * 4 + 3] > 96) pts.push(x, y);
+    }
+  }
+  const m = pts.length / 2;
+  const px = new Float32Array(n), py = new Float32Array(n);
+  const pz = new Float32Array(n), rot = new Float32Array(n);
+  const scale = 52 / w;                   // 世界宽约 52
+  for (let i = 0; i < n; i++) {
+    const j = Math.floor(i * (m / n)) % m;
+    const x = pts[j * 2], y = pts[j * 2 + 1];
+    px[i] = (x - w / 2) * scale;
+    py[i] = -(y - h / 2) * scale;
+    // 浅拱顶：字中部微凸，相机动时有立体感
+    pz[i] = Math.sin((x / w) * Math.PI) * 1.2;
+    // 固定伪随机小倾角（剑阵参差感；确定性，不进热循环）
+    rot[i] = Math.sin(i * 12.9898) * 0.14;
+  }
+  return { px, py, pz, rot };
+}
+
 
 export class Volley {
   constructor(scene) {
@@ -149,7 +195,12 @@ export class Volley {
     // 7. 剑气拖尾（SlashSaber）
     this.trails = [];
     this.trailFree = [];
-    for (let k = 0; k < 20; k++) {
+
+    // 6b. 隐藏字阵：Molispark 真字体采样（首次进入时才构建——字体需先加载）
+    this._letterBuilt = false;
+    this._letterAge = 0;          // LETTERS 入场时间轴（从进入阵型开始计秒）
+
+    for (let i = 0; i < 20; i++) {
       const mat = TrailRenderer.createGlowMaterial(
         new THREE.Color(0.4, 0.9, 1.0),
         new THREE.Color(0.0, 0.45, 1.0)
@@ -200,6 +251,29 @@ export class Volley {
         this.positions[i].set(x, y, z);
         const fallSp = -(48 + Math.random() * 24);
         this.velocities[i].set((Math.random() - 0.5) * 1.5, fallSp, (Math.random() - 0.5) * 1.5);
+      }
+    } else if (f === 'LETTERS') {
+      // 首次进入才构建字体采样（YujianKai 此时已加载完毕）
+      if (!this._letterBuilt) {
+        const LAY = buildTextLayout(N);
+        this._letterPx = LAY.px; this._letterPy = LAY.py;
+        this._letterPz = LAY.pz; this._letterRot = LAY.rot;
+        this._letterBuilt = true;
+      }
+      // 隐藏字阵入场：万剑先向天环炸开——径向外冲 + 切向旋量初速
+      this._letterAge = 0;
+      for (let i = 0; i < N; i++) {
+        const ratio = i / N;
+        const phi = Math.acos(1 - 2 * ratio);
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+        const R = 26 + (i % 7) * 1.4;                 // 天环半径（带起伏）
+        const a = theta;                              // 圆环角
+        const px = Math.cos(a) * R * Math.sin(phi);
+        const py = Math.cos(phi) * R;
+        const pz = Math.sin(a) * R * Math.sin(phi) * 0.8;
+        this.velocities[i].set(px * 0.6, py * 0.6, pz * 0.6);  // 径向外冲
+        this.velocities[i].x += -Math.sin(a) * 12;
+        this.velocities[i].y += Math.cos(a) * 8;
       }
     }
   }
@@ -343,6 +417,7 @@ export class Volley {
     }
 
     const gestureMode = this.formation;
+    if (gestureMode === 'LETTERS') this._letterAge += delta;
     const dummy = this.dummy;
 
     // 2. 逐剑更新（大庚原版 1:1 精密物理与阵型数学）
@@ -385,8 +460,9 @@ export class Volley {
       }
 
       // ============ 大庚四大绝阵数学 ============
-      if (gestureMode === 'SHIELD' && this.isTracking) {
-        // ---- 护盾模式：R=18 斐波那契球高速公转 ----
+      if (gestureMode === 'SHIELD') {
+        // ---- 护盾模式：R=18 斐波那契球高速公转（09-11 修 attract：去掉 isTracking 门槛，
+        // 否则无人告示 FIST 落成游龙 blob）----
         const phi = Math.acos(1 - (2 * (i + 0.5)) / CONFIG.swordCount);
         const theta = Math.PI * (1 + Math.sqrt(5)) * i;
 
@@ -575,6 +651,38 @@ export class Volley {
           pos.y + this.velocities[i].y,
           pos.z + this.velocities[i].z
         );
+      } else if (gestureMode === 'LETTERS') {
+        // ---- 隐藏字阵：Molispark 真字体——先旋天环，再螺旋收成字（固定原点，不跟手）----
+        const age = this._letterAge;
+        const CX = this._origin.x, CY = this._origin.y, CZ = this._origin.z;
+        const lx = this._letterPx[i], ly = this._letterPy[i], lz = this._letterPz[i];
+        // 0-1.2s 天环；1.2-3.2s smoothstep 收字；之后贴字呼吸
+        let k = 0;
+        if (age >= 3.2) k = 1;
+        else if (age > 1.2) { const u = (age - 1.2) / 2; k = u * u * (3 - 2 * u); }
+        const rot = age * 2.4;
+        const ringPhi = i / this.swordTotal * Math.PI * 2 + rot;
+        const ringR = 34 + (i % 7) * 1.2;
+        const ringX = CX + Math.cos(ringPhi) * ringR;
+        const ringY = CY + Math.sin(ringPhi) * ringR;
+        const ringZ = CZ + Math.sin(ringPhi * 1.3) * 5;
+        const breathe = age >= 3.2 ? 1 + Math.sin(time * 2 + i * 0.05) * 0.04 : 1;
+        target.set(
+          ringX + (lx * breathe - ringX) * k,
+          ringY + (ly * breathe - ringY) * k,
+          ringZ + (lz - ringZ) * k        // 浅拱顶，字中部微凸
+        );
+        if (k > 0.5) {
+          // 剑刃朝上带固定小倾角：字阵像一片竖立的剑林，而不是躺平的光点
+          const ta = this._letterRot[i];
+          _look.set(target.x + Math.sin(ta) * 0.7, target.y + 3, target.z + Math.cos(ta) * 0.5);
+        } else {
+          _look.set(
+            pos.x + this.velocities[i].x,
+            pos.y + this.velocities[i].y,
+            pos.z + this.velocities[i].z
+          );
+        }
       } else if (gestureMode === 'DAGENG' && this.isTracking) {
         // ---- 大庚剑阵：0号主剑巨大化6x，其余10层同心圆柱倒悬 ----
         if (i === 0) {
@@ -665,7 +773,7 @@ export class Volley {
         gestureMode === 'BAGUA' || gestureMode === 'PILLAR' ||
         gestureMode === 'HEXAGRAM' ||
         gestureMode === 'INFINITY' || gestureMode === 'ENERGY_BALL' ||
-        gestureMode === 'EXPLODE';
+        gestureMode === 'EXPLODE' || gestureMode === 'LETTERS';
       const arriveR = ours ? 6 : 10;
       let speed = ours
         ? 18
@@ -710,6 +818,10 @@ export class Volley {
       const steer = _steer.copy(desired).sub(vel);
       steer.clampLength(0, CONFIG.steerForce * delta * steerFactor);
 
+      // 转向力必须真正并入速度——v7.1 去分配重构时误删本行，
+      // 导致一切 target 驱动阵型失去收敛加速度、剑群停死在初始盒子里（开机方形剑阵）
+      vel.add(steer);
+
       // 分离力：只用于大庚四绝阵的疏阵列（DRAGON 龙身/DAGENG 柱阵/未跟手的莲花散布）。
       // 八卦爻线、剑柱、8 字环等自研阵型是密集实线排布（剑距 <0.1），分离力会把图形推散。
       const sepOn =
@@ -735,11 +847,11 @@ export class Volley {
         gestureMode === 'BAGUA' || gestureMode === 'PILLAR' ||
         gestureMode === 'HEXAGRAM' || gestureMode === 'RAIN' ||
         gestureMode === 'INFINITY' || gestureMode === 'ENERGY_BALL' ||
-        gestureMode === 'EXPLODE' ||
+        gestureMode === 'EXPLODE' || gestureMode === 'LETTERS' ||
         (gestureMode === 'DRAGON' && i < 25)
       ) {
         // 阵型在目标计算分支里已写入 _look
-      } else if (gestureMode === 'SHIELD' && this.isTracking) {
+      } else if (gestureMode === 'SHIELD') {
         if (vel.length() > 0.1) {
           _look.copy(pos).add(_des.copy(vel).normalize());
         } else {
@@ -770,12 +882,13 @@ export class Volley {
       }
       dummy.lookAt(lookTarget);
 
-      // 按剑尺度平滑过渡（大庚主剑 6x/阵剑 1.5x；八卦环细剑）
       let targetScale = 1;
       if (gestureMode === 'DAGENG' && this.isTracking) {
         targetScale = i === 0 ? 6 : 1.5;
       } else if (gestureMode === 'BAGUA') {
         targetScale = i < 183 ? 0.45 : 0.5;
+      } else if (gestureMode === 'LETTERS') {
+        targetScale = 0.24;   // 小剑字才锐利（0.32 时 bloom 互相叠成毛边）
       }
 
       const lerpSpeed = i === 0 && gestureMode === 'DAGENG' ? 0.6 : 2.0;

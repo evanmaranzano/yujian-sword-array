@@ -96,7 +96,7 @@ function palmCenter(lm) {
 // One-Euro 自适应低通（Casiez et al. 2012）：慢速时强滤波杀 landmark 抖动，
 // 快速时自动放宽带宽保跟手。只作用于显示路径（published nx/ny），
 // 挥舞检测仍吃原始已接受帧，速度计算不受滤波畸变影响。
-class OneEuro2D {
+export class OneEuro2D {
   constructor(minCutoff = 1.1, beta = 0.55, dCutoff = 1.0) {
     this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
     this.reset();
@@ -168,6 +168,7 @@ export class HandTracker {
     this.detector = new SwipeDetector();
     this.oe = new OneEuro2D();      // 显示路径平滑（nx/ny），挥舞检测不经过它
     this._gSm = new LandmarkSmoother();  // 手势分类专用 landmark 滤波（亮光抖动主防线）
+    this._gSm2 = new LandmarkSmoother(); // 第二只手同滤波：合十等双手手势相对抖动会闪判（09-11 隐藏手势）
     this._vote = [];                // 手势滑窗多数票（窗 5）
     this._lumaCv = null; this._lumaAt = 0; this.brightWarn = false;
     // 手势上下文（指向方向/掌法向/第二只手/双手中心，镜像坐标系）
@@ -220,6 +221,7 @@ export class HandTracker {
     this.hand2Nx = null; this.handDist = 0.3;
     this._gSm.reset(); this._vote.length = 0;
     this._gCandidate = GESTURE.IDLE; this._gPublished = GESTURE.IDLE;
+    this._gSm2.reset();
   }
 
   async start() {
@@ -404,10 +406,18 @@ export class HandTracker {
   _updateGesture(now, landmarks) {
     let g;
     if (landmarks && landmarks.length) {
-      const sm0 = this._gSm.apply(landmarks[0], now);      // 只滤主手（分类关键路径）
-      g = detectGesture(sm0, [sm0, ...landmarks.slice(1)]);
+      const sm0 = this._gSm.apply(landmarks[0], now);      // 主手滤波
+      let ordered;
+      if (landmarks.length >= 2) {
+        const sm1 = this._gSm2.apply(landmarks[1], now);   // 第二只手同滤波（合十稳定）
+        ordered = [sm0, sm1];
+      } else {
+        this._gSm2.reset();
+        ordered = [sm0];
+      }
+      g = detectGesture(sm0, ordered);
     } else {
-      this._gSm.reset();
+      this._gSm.reset(); this._gSm2.reset();
       g = GESTURE.IDLE;
     }
     // 滑窗多数票：单帧误判被历史票数压掉（亮光环境第二道防线）

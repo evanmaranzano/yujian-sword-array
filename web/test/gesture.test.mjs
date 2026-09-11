@@ -157,3 +157,84 @@ test('HANDS_CUP: horizontal bowl, fingers toward each other', () => {
   h2[12].x = 0.56; h2[12].y = 0.52;
   assert.equal(detectGesture(h1, [h1, h2]), G.HANDS_CUP);
 });
+
+// ---- 隐藏手势：三指（THREE_FINGERS）→ Molispark 字阵（左下角指南不展示） ----
+
+function threeFingersHand() {
+  // 默认开掌上，只把小指弯回去
+  return hand({
+    20: { x: 0.64, y: 0.52, z: 0 },
+    18: { x: 0.64, y: 0.50, z: 0 },
+  });
+}
+
+test('THREE_FINGERS: 食中无名伸直、小指弯曲', () => {
+  const h = threeFingersHand();
+  assert.equal(detectGesture(h, [h]), G.THREE_FINGERS);
+});
+
+test('THREE_FINGERS: 剑指（无名也弯）仍是 TWO_FINGERS', () => {
+  assert.equal(detectGesture(twoFingersHand(), [twoFingersHand()]), G.TWO_FINGERS);
+});
+
+test('THREE_FINGERS: 开掌（小指也伸）仍是 OPEN_PALM', () => {
+  assert.equal(detectGesture(hand(), [hand()]), G.OPEN_PALM);
+});
+
+// ---- 09-11 回归：「一直都是剑雨倾盆」——PALM_DOWN 旧判据偷走一切前伸/放松手 ----
+
+// 前伸开掌：四指朝镜头水平前伸（-z），掌面竖直。旧判据 avgTipY > 5.y-0.02 必中。
+function forwardPalmHand() {
+  const h = hand();
+  for (const m of [5, 9, 13, 17]) {
+    h[m]     = { x: h[m].x, y: 0.55, z: 0 };
+    h[m + 1] = { x: h[m].x, y: 0.55, z: -0.06 };
+    h[m + 2] = { x: h[m].x, y: 0.55, z: -0.11 };
+    h[m + 3] = { x: h[m].x, y: 0.55, z: -0.15 };
+  }
+  h[2] = { x: 0.38, y: 0.62, z: -0.03 }; h[3] = { x: 0.35, y: 0.60, z: -0.06 };
+  h[4] = { x: 0.32, y: 0.58, z: -0.09 };
+  return h;
+}
+
+test('regression: forward open palm is OPEN_PALM, never PALM_DOWN', () => {
+  const h = forwardPalmHand();
+  assert.equal(detectGesture(h, [h]), G.OPEN_PALM);
+});
+
+test('regression: relaxed half-drooped hand is not PALM_DOWN', () => {
+  // 放松半垂手：手指半伸向前下方、拇指自然内收（展厅待机最常见手型）。旧判据会判剑雨。
+  const h = hand();
+  for (const m of [5, 9, 13, 17]) {
+    h[m]     = { x: h[m].x, y: 0.55, z: 0 };
+    h[m + 1] = { x: h[m].x, y: 0.48, z: -0.05 };
+    h[m + 2] = { x: h[m].x, y: 0.50, z: -0.12 };
+    h[m + 3] = { x: h[m].x, y: 0.54, z: -0.20 };
+  }
+  h[4] = { x: 0.42, y: 0.62, z: -0.04 }; h[3] = { x: 0.40, y: 0.60, z: -0.02 };
+  assert.equal(detectGesture(h, [h]), G.IDLE);
+});
+
+test('regression: forward sword finger is TWO_FINGERS, never PALM_DOWN', () => {
+  // 剑指前指屏幕：食中沿 -z 伸直，无名/小指收拢回掌心
+  const h = forwardPalmHand();
+  h[14] = { x: 0.58, y: 0.58, z: -0.05 }; h[15] = { x: 0.58, y: 0.62, z: -0.06 };
+  h[16] = { x: 0.58, y: 0.66, z: -0.05 };
+  h[18] = { x: 0.64, y: 0.60, z: -0.04 }; h[19] = { x: 0.64, y: 0.64, z: -0.05 };
+  h[20] = { x: 0.64, y: 0.68, z: -0.04 };
+  assert.equal(detectGesture(h, [h]), G.TWO_FINGERS);
+});
+
+test('PALM_DOWN: flat palm pressing down (horizontal hand) still triggers', () => {
+  // 真下压：掌面放平（掌心朝地），四指向前平伸——掌法向 y 主导
+  const h = forwardPalmHand();
+  for (const m of [5, 9, 13, 17]) {
+    h[m].z = 0; h[m].y = 0.55;
+    h[m + 1] = { x: h[m].x, y: 0.56, z: -0.07 };
+    h[m + 2] = { x: h[m].x, y: 0.57, z: -0.13 };
+    h[m + 3] = { x: h[m].x, y: 0.58, z: -0.18 };
+  }
+  // 掌面绕 x 放平：腕与四指根几乎同 y，法向 ≈ ±y
+  h[0] = { x: 0.5, y: 0.56, z: 0.06 };
+  assert.equal(detectGesture(h, [h]), G.PALM_DOWN);
+});

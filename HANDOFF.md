@@ -479,3 +479,14 @@ GitHub 仓库 evanmaranzano/yujian-sword-array（v5 快照）clone 到 `Desktop\
 - **热循环去分配（审查修复）**：`update`/`lookAt`/`pathHistory`/`trails` 全部复用 `_tgt/_look/_des/_steer/_sep` 与 ring 槽 `copy`，不再 `pos.clone()` / `new THREE.Vector3`。`director` 不再把整份 tracker state 塞进误名 `this.s2`，改为 `vx/vy/handDist/palmDir/palmN`。
 - 验证：`node --test web/test/*.mjs` 27/27；截图 `web/shots/v7_{idle,rain,two_fingers}.png`。
 
+### 9.12 v7.2（2026-09-11 修「一直都是剑雨倾盆」+ 剑指识别/追踪增强）
+
+- **根因**：`isPalmDown` 旧判据 `avgTipY > landmarks[5].y - 0.02` 命中一切前伸/非竖直向上的手——前指屏幕的剑指（z 深度噪声大，`fingerExt` 严格门槛漏检）、前推开掌、放松半垂手全部落进 PALM_DOWN，且 PALM_DOWN 优先级高于 OPEN_PALM，莲花被永久抢跑。表现即用户实测「别的手势识别无效，一直剑雨」。
+- **修复（gesture.js）**：①`isPalmDown` 重写为真「下压」语义——掌面放平（掌法向 |ny|/|n| > 0.68，叉积与左右手/镜像无关）或整手倒转指尖朝下（腕高于指尖 0.05），并要求 ≥3 指伸展 + 食中伸展而环小收拢时直接否决（指点姿态兜底）；②`isTwoFingers` 增加相对回缩判据（无名/小指尖距腕 < 中指尖距腕 ×0.80，与手朝向无关，前指姿态稳定）；③`fingerExt` 门限放宽（1.05→1.02 / 150°→148° / 1.16→1.13）适配前指 z 噪声。
+- **剑指动作追踪（director.js）**：DRAGON 靶心（食中指尖中点）与指根各过一路 One-Euro（tracking.js 导出 `OneEuro2D`；tip 2.4/1.2、base 1.6/0.6），慢速杀抖、挥动自动放宽带宽；非 DRAGON/手丢失即 reset。`screenToWorld` 改模块级 `_sv` 复用向量，去掉逐帧 `new/clone`。
+- **回归测试（gesture.test.mjs +4）**：前伸开掌→OPEN_PALM（旧：PALM_DOWN）、放松半垂手→IDLE（旧：PALM_DOWN）、前指剑指→TWO_FINGERS、平掌下压→PALM_DOWN（真阳性保留）。
+- 验证：node 31/31；无头截图剑指/剑雨启动无 ReferenceError，阵型渲染正常。**教训：editor 多 PUT 批量补丁可能部分静默丢弃，改完必须 grep 确认符号定义存在再验证**（本轮 `_sv`/`_tipOE` 曾漏插入，node --check 查不出运行期 ReferenceError）。
+- **开机方形剑阵根因（同日第二 bug，用户实测"昨天 09:30 GitHub 版还是好的"）**：v7.1 `df05d9e`「热循环去分配」重构时**误删 `vel.add(steer);`**（v7 `1acbf43` 在 `steer.clampLength` 之后）——steer 算出后从未并入速度，一切 target 驱动阵型失去收敛加速度，剑群停死在初始 20×15×10 随机盒子=开机方形剑阵。已在原位置补回（分离力之前）。验证：无头截图 IDLE 圆蒲公英/FIST 球盾/THUMB_UP 剑柱/DRAGON 游龙全部复原。排查方法：`git worktree` 分别拉 v7/v7.1/当前三版无头截图对比，零成本锁定回归提交。
+- **无人 attract 轮播（同日用户需求"待机一直旋转太单调"）**：`director.js` 顶部 `ATTRACT_SEQ`（8 项，大庚不入轮播——用户点名）——无人（非 candidate）时按序循环 剑莲8s→剑柱12→八卦18→六芒14→聚能球14→8字环14→剑盾12→剑雨8，steering 自然聚散过渡。**短暂误检只暂停不重置**（否则后排阵型永不出现，用户实测发现）；连续在场 >2.5s 才算真人互动、人走后从剑莲重启（`_presentSince` 计时）。只调 `volley.setMode`（手势 key），不影响手势链路。验证：`?demo=1&t=30/90/100/110` 截图分别命中八卦/剑盾/剑雨/回绕剑莲。
+- **隐藏手势 THREE_FINGERS（三指 → Molispark 字阵）**：单手食中无名伸直、小指弯（用户嫌合十难认）；排在剑指后、开掌前。左栏不展示。字阵**真字体方案**（用户嫌手画笔画丑）：首次进入时离屏 canvas 以 `bold 240px YujianKai` 渲染单词，实心掩码均匀采样铺满 999 点（世界宽 52、浅拱顶 z、伪随机小倾角 0.14），剑刃朝上竖立成"剑林"；`scl=0.24`（大则 bloom 叠成毛边）。首次构建在 setMode（字体需已加载）。**`_letterAge` 必须在 for 循环外累加**（误写进逐剑循环会一帧跳 16s 跳过散开）。散开 0–1.2s 旋天环 → 1.2–3.2s smoothstep 收字 → 贴字呼吸。ours+_look 写集，sepOn 关，齐发屏蔽，第二只手同滤波。验证：34/34；无头 t=5.5 截图字体清晰可读。
+

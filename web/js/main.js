@@ -34,6 +34,7 @@ const GESTURE_NAMES = {
   HANDS_PUSH: '双手推开 - 爆裂波',
   HANDS_CUP: '双手捧起 - 聚能球',
   DOUBLE_FIST: '双拳 - 八卦阵',
+  THREE_FINGERS: '三指 - Molispark',
 };
 const HAND_CONN = [
   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -80,6 +81,7 @@ const ui = {
         FIST: '#88ccff', ROCK: '#7dd3fc', DOUBLE_FIST: '#c4b5fd',
         THUMB_UP: '#67e8f9', SHAKA: '#ffd166', PALM_DOWN: '#6fa8ff',
         CROSSED_HANDS: '#e0e0ff', HANDS_PUSH: '#ff9f6f', HANDS_CUP: '#6fc3ff',
+        THREE_FINGERS: '#ffd76f',
       };
       el.style.color = MODE_COLOR[g] || '#00ffff';
     }
